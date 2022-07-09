@@ -28,7 +28,6 @@ class UILayer: public sigc::trackable
 	Glib::Dispatcher* dispatcher_close = NULL;
 	
 	Gtk::Window* window = NULL;
-	Gtk::Dialog* input_dialog = NULL; Gtk::Label* label_input_dialog = NULL; Gtk::Entry* entry_input = NULL;
 	Gtk::FileChooserDialog* file_dialog = NULL;
 	Gtk::InfoBar* infobar = NULL; Gtk::Label* label_infobar = NULL;
 	Gtk::Button* button_on_off = NULL;
@@ -40,7 +39,7 @@ class UILayer: public sigc::trackable
 	steady_clock::time_point t_status_refresh;
 	
 	void create_window();
-	void create_input_dialog();
+	//void create_input_dialog();
 	void create_file_dialog();
 	void app_run();
 	

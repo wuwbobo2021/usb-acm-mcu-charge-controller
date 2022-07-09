@@ -86,14 +86,13 @@ void UILayer::app_run()
 	Glib::RefPtr<Gtk::Application> app = Gtk::Application::create(UILayer::App_Name);
 	this->dispatcher_refresh = new Glib::Dispatcher;
 	this->dispatcher_close = new Glib::Dispatcher;
-	this->create_window();
-	this->create_input_dialog(); this->create_file_dialog();
+	this->create_window(); this->create_file_dialog();
 	this->dispatcher_refresh->connect(sigc::mem_fun(*this, &UILayer::refresh_ui));
 	this->dispatcher_close->connect(sigc::mem_fun(*this, &UILayer::close_window));
 	app->run(*this->window);
 	
 	this->window = NULL; //the window is already destructed when the thread exits Application::run()
-	delete this->file_dialog; delete this->input_dialog;
+	delete this->file_dialog;
 	delete this->dispatcher_refresh; delete this->dispatcher_close;
 } // Unsolved problem on windows platform when running in a new thread: Segmentation fault received here.
 
@@ -185,19 +184,6 @@ void UILayer::create_window()
 	this->infobar->hide();
 }
 
-void UILayer::create_input_dialog()
-{
-	input_dialog = new Gtk::Dialog("User Input", *this->window, true);
-	label_input_dialog = Gtk::manage(new Gtk::Label);
-	entry_input = Gtk::manage(new Gtk::Entry);
-	input_dialog->get_content_area()->pack_start(*label_input_dialog);
-	input_dialog->get_content_area()->pack_start(*entry_input);
-	input_dialog->add_button("_OK", Gtk::RESPONSE_OK);
-	input_dialog->add_button("_Cancel", Gtk::RESPONSE_CANCEL);
-	input_dialog->set_default_size(320, 80);
-	input_dialog->show_all_children();
-}
-
 void UILayer::create_file_dialog()
 {
 	Glib::RefPtr<Gtk::FileFilter> filter = Gtk::FileFilter::create();
@@ -281,7 +267,7 @@ void UILayer::on_button_on_off_clicked()
 	this->infobar->hide();
 	
 	ChargeControlState st = this->ctrl->control_status().control_state;
-	if (st == Device_Disconnected ||  st == Battery_Disconnected) return;
+	if (st == Device_Disconnected || st == Battery_Disconnected) return;
 	
 	if (st != Battery_Charging)
 		this->ctrl->start_charging();
@@ -298,15 +284,15 @@ void UILayer::on_button_adjust_clicked()
 	this->infobar->hide();
 	
 	float vol, cur;
-	if (! user_input_value("Input expected current (mA):", &cur, 100.0)) return;
-	if (! user_input_value("Input expected voltage (V):", &vol, 1.2)) return;
+	if (! user_input_value("Input expected current (mA):", &cur,
+	                       this->ctrl->control_status().exp_current / 1000.0)) return;
+	if (! user_input_value("Input expected voltage (V):", &vol,
+	                       this->ctrl->control_status().exp_voltage)) return;
 	this->ctrl->set_charge_exp(cur / 1000.0, vol);
 }
 
 void UILayer::on_button_calibrate_clicked()
 {
-	using Glib::Ascii::dtostr;
-	
 	this->infobar->hide();
 	
 	float v_adc1_actual, v_bat_actual, v_ext_power, r_extra;
@@ -324,9 +310,9 @@ void UILayer::on_button_calibrate_clicked()
 		this->ctrl->calibrate(v_bat_actual, v_ext_power, r_extra);
 	}
 	
-	Gtk::MessageDialog msg_dlg("On-chip VRefInt is calculated: " +
-	                           dtostr((int)(this->ctrl->conf.v_refint * 1000) / 1000.0) + " V.");
-	msg_dlg.set_transient_for(*this->window); msg_dlg.set_modal(true);
+	Gtk::MessageDialog msg_dlg(*this->window,
+	                           "On-chip VRefInt is calculated: " + to_string(this->ctrl->conf.v_refint) + " V.",
+							   false, Gtk::MESSAGE_INFO, Gtk::BUTTONS_OK, true);
 	msg_dlg.run(); msg_dlg.close();
 }
 
@@ -381,21 +367,31 @@ void UILayer::on_infobar_response(int response)
 
 bool UILayer::user_input_value(const string& str_prompt, float* p_val, float val_default)
 {
+	// strange: while the file dialog can be reused, reuse of the input dialog always cause problem
+	Gtk::Dialog* input_dialog = new Gtk::Dialog("User Input", *this->window, true);
+	Gtk::Label* label_input_dialog = Gtk::manage(new Gtk::Label);
+	Gtk::Entry* entry_input = Gtk::manage(new Gtk::Entry);
+	input_dialog->get_content_area()->pack_start(*label_input_dialog);
+	input_dialog->get_content_area()->pack_start(*entry_input);
+	input_dialog->add_button("_OK", Gtk::RESPONSE_OK);
+	input_dialog->add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+	input_dialog->set_default_size(320, 80);
+	input_dialog->show_all_children();
+	
 	stringstream sst; sst.setf(ios::fixed); sst.precision(3);
 	sst << val_default;
-	this->label_input_dialog->set_label(str_prompt);
-	this->entry_input->set_text(sst.str());
-	Gtk::ResponseType resp = (Gtk::ResponseType) this->input_dialog->run();
-	this->input_dialog->close(); this_thread::sleep_for(chrono::milliseconds(10));
-	if (resp != Gtk::RESPONSE_OK) return false;
-	
-	sst.str(this->entry_input->get_text());
-	sst >> *p_val;
-	return (bool)sst;
+	label_input_dialog->set_label(str_prompt);
+	entry_input->set_text(sst.str()); sst.clear();
+	Gtk::ResponseType resp = (Gtk::ResponseType) input_dialog->run();
+	input_dialog->close();
+	if (resp == Gtk::RESPONSE_OK) {
+		sst.str(entry_input->get_text()); sst >> *p_val;
+	}
+	delete input_dialog;
+	return resp == Gtk::RESPONSE_OK && !sst.fail();
 }
 
-// used by dispatcher_gtk
-void UILayer::close_window()
+void UILayer::close_window() //used by dispatcher_close
 {
 	this->window->close();	
 }

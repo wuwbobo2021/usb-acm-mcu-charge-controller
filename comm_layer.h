@@ -51,7 +51,7 @@ inline DataCallbackPtr MemberFuncDataCallbackPtr(T* pobj)
 const unsigned int Oversampling_Radius = 8,
                    Data_Amount_Per_Av_First = 128,
                    Data_Amount_Per_Av_Second = ADC_Bulk_Data_Amount / Data_Amount_Per_Av_First,
-                   Interval_Read_VRefInt = 10 * 1000;//60 * 1000;
+                   Interval_Read_VRefInt = 30 * 1000;
 
 class CommLayer
 {
@@ -70,7 +70,7 @@ class CommLayer
     
 	DataCallbackPtr callback_ptr;
 	
-	steady_clock::time_point t_read_vrefint;
+	steady_clock::time_point t_read_ad_vrefint;
 	
 	volatile bool flag_dac_output = false; volatile uint16_t dac_new_val;
 	volatile bool flag_shake = false, flag_shake_success = false;
@@ -85,7 +85,7 @@ class CommLayer
 	bool rec_data(uint32_t timeout_ms);
     void process_data();
     
-	bool read_vrefint(bool recover = false);
+	bool read_ad_vrefint(bool recover = false);
 	float get_voltage(float val);
 	uint16_t from_voltage(float val);
 	

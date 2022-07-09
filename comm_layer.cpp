@@ -43,7 +43,7 @@ bool CommLayer::connect(DataCallbackPtr cb_ptr)
 	adc_conf.ADC_SampleTime = ADC_SampleTime_601Cycles5;
 	bulk_interval_ms = ADC_Buffer_Data_Amount * adc_raw_data_interval_ms(adc_conf.ADC_SampleTime);
 	
-	if (! read_vrefint(true)) {
+	if (! read_ad_vrefint(true)) {
 		serial.CloseDevice(); return flag_connected = false;
 	}
 	
@@ -54,8 +54,8 @@ bool CommLayer::connect(DataCallbackPtr cb_ptr)
 }
 
 // note: `recover` can also be true when ADC is not converting if the caller
-//       expect it to start regular conversion after reading VRefInt.
-bool CommLayer::read_vrefint(bool recover) 
+//       expect it to start regular conversion after reading AD_VRefInt.
+bool CommLayer::read_ad_vrefint(bool recover) 
 {
 	if (recover) {
 		if (! send_cmd_rec_resp(Cmd_ID_ADC_Stop)) return false;
@@ -72,7 +72,7 @@ bool CommLayer::read_vrefint(bool recover)
 	if (! send_cmd_rec_resp(Cmd_ID_ADC_Stop)) return false;
 	process_data();
 	vdda = vrefint * ADC_Raw_Value_Max / adc2_value;
-	t_read_vrefint = steady_clock::now();
+	t_read_ad_vrefint = steady_clock::now();
 	
 	// config normally
 	adc_conf.Use_VRefInt_For_ADC2 = false;
@@ -135,8 +135,8 @@ void CommLayer::comm_loop()
 			flag_shake = false;
 		}
 		
-		if (steady_clock::now() - t_read_vrefint > milliseconds(Interval_Read_VRefInt))
-			read_vrefint(true);
+		if (steady_clock::now() - t_read_ad_vrefint > milliseconds(Interval_Read_VRefInt))
+			read_ad_vrefint(true);
 		
 		if (rec_data(bulk_interval_ms + 2000))
 			flag_data_ready = true;
