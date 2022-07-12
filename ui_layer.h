@@ -39,7 +39,6 @@ class UILayer: public sigc::trackable
 	steady_clock::time_point t_status_refresh;
 	
 	void create_window();
-	//void create_input_dialog();
 	void create_file_dialog();
 	void app_run();
 	
@@ -59,11 +58,11 @@ class UILayer: public sigc::trackable
 	void close_window();
 	
 public:
-	const std::string App_Name = "org.usb-acm-charge-controller.monitor";
+	const std::string App_Name = "org.usb-vcp-mcu-charge-controller.monitor";
 	string title = "Charge Monitor";
 	
-	UILayer(); void init(ChargeControlLayer* ctrl, unsigned int buf_size = 12*3600*10);
-	UILayer(ChargeControlLayer* ctrl, unsigned int buf_size = 12*3600*10);
+	UILayer(); void init(ChargeControlLayer* ctrl, unsigned int buf_size = 2*12*3600);
+	UILayer(ChargeControlLayer* ctrl, unsigned int buf_size = 2*12*3600);
 	UILayer(const UILayer&) = delete;
 	UILayer& operator=(const UILayer&) = delete;
 	virtual ~UILayer();

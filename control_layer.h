@@ -17,6 +17,8 @@ inline float ms_since(steady_clock::time_point t) {
 
 struct ChargeControlConfig
 {
+	bool  opt_stage_const_v = false;    // enable const voltage stage (for Li-ion batteries)
+	
 	float v_refint = ADC_VRefInt,       // on-chip stable reference voltage (V), it can be calibrated manually
 	      v_ext_power = 5.0,			// charge supply voltage (V), no update schedule in current version
 	      div_per = 5.6 / (3.0 + 5.6),	// divider_percentage, for ADC input of VSupply - VBattery
@@ -27,8 +29,7 @@ struct ChargeControlConfig
 	      
 	      v_bat_detect_th = 0.4,		// threshold for battery detection (V)
 	      v_dac_adj_step = 0.001,		// minimum increment/decrement of DAC output voltage (V)
-	      v_bat_dec_th = 0.005,			// threshold for detecting voltage decline (V)
-	      dur_stag_max = 60;			// voltage stagnation duration (s)
+	      v_bat_dec_th = 0.003;			// threshold for detecting voltage decline (V), for Ni-MH batteries
 };
 
 enum ChargeControlState
@@ -36,7 +37,8 @@ enum ChargeControlState
 	Device_Disconnected = 0,
 	Battery_Disconnected,
 	Battery_Connected,
-	Battery_Charging,
+	Battery_Charging_CC,
+	Battery_Charging_CV,
 	Charge_Completed,
 	Charge_Stopped
 };
@@ -47,7 +49,8 @@ inline ostream& operator<<(ostream& ost, const ChargeControlState& st)
 		case Device_Disconnected:	ost << "Disconnected";	break;
 		case Battery_Disconnected:	ost << "No Battery";	break;
 		case Battery_Connected:		ost << "Ready";			break;
-		case Battery_Charging:		ost << "Charging";		break;
+		case Battery_Charging_CC:	ost << "Charging (CC)";	break; //const current stage
+		case Battery_Charging_CV:	ost << "Charging (CV)";	break; //const voltage stage
 		case Charge_Completed:		ost << "Complete";		break;
 		case Charge_Stopped:		ost << "Stopped";		break;
 	}
@@ -57,16 +60,21 @@ inline ostream& operator<<(ostream& ost, const ChargeControlState& st)
 struct ChargeStatus
 {
 	ChargeControlState control_state;
-	float exp_current = 0, exp_voltage = 0;
+	float exp_current = 0, exp_voltage = 0, exp_charge = 0;
 	
 	steady_clock::time_point t_last_update;
 	float dac_voltage;
-	float bat_voltage, bat_current, bat_power, mos_power; //unit: V, A
+	float bat_voltage, bat_current, bat_power, mos_power; //unit: V, A, W
 	
 	float bat_voltage_initial, bat_voltage_final;
 	system_clock::time_point t_charge_start, t_charge_stop;
+	
 	float bat_voltage_max; steady_clock::time_point t_bat_voltage_max;
 	float bat_current_max; steady_clock::time_point t_bat_current_max;
+	
+	bool flag_ir_measured = false;
+	float ir = 0; //DC internal resistance estimation (ohm)
+	
 	float bat_charge, bat_energy; //unit: C, J
 	
 	ChargeStatus();
@@ -84,11 +92,12 @@ inline ChargeStatus::ChargeStatus()
 inline void ChargeStatus::reset()
 {
 	control_state = Device_Disconnected;
-	// exp_current, exp_voltage are not reset
+	// exp_current, exp_voltage, exp_charge are not reset
 	dac_voltage = 0;
 	bat_voltage = bat_current = bat_power = mos_power = 0;
 	bat_voltage_initial = bat_voltage_final = 0;
 	bat_voltage_max = 0; bat_current_max = 0;
+	flag_ir_measured = false; ir = 0;
 	bat_charge = bat_energy = 0;
 }
 
@@ -112,7 +121,7 @@ inline ostream& operator<<(ostream& ost, const ChargeControlEvent& ev)
 		case Event_Battery_Disconnect:	ost << "Battery Disconnected";	break;
 		case Event_New_Data:			ost << "Data Updated";			break;
 		case Event_Charge_Complete:		ost << "Charge Completed";		break;
-		case Event_Charge_Brake:		ost << "Emergency: Stopped!";	break;
+		case Event_Charge_Brake:		ost << "! Emergency: Stopped";	break;
 	}
 	return ost;
 }
@@ -157,12 +166,14 @@ class ChargeControlLayer
 	ChargeStatus status;
 	volatile bool flag_new_data = false, flag_start = false, flag_stop = false, flag_close = false;
 	steady_clock::time_point t_last_shake; unsigned int cnt_shake_failed = 0;
+	unsigned int cnt_v_dec = 0;
 	
 	CommLayer comm; DataCallbackPtr data_callback_ptr;
 	thread* thread_control = NULL; EventCallbackPtr event_callback_ptr;
 	
 	void control_loop();
 	void wait_for_new_data();
+	void complete_charging(bool successful = true);
 	void do_stop_charging(bool remeasure_voltage);
 	void switch_off();
 	void data_callback(float udiv, float usamp);
@@ -178,7 +189,7 @@ public:
 	const float* battery_voltage_ptr() const;
 	
 	void set_event_callback_ptr(EventCallbackPtr ptr);
-	bool set_charge_exp(float cur, float vol);
+	bool set_charge_exp(float cur, float vol, float chg);
 	void calibrate(float v_adc1_actual);
 	void calibrate(float v_bat_actual, float v_ext_power, float r_extra = -1); //-1 means do not change
 	bool start_charging();

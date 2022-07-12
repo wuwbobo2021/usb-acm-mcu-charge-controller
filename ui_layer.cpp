@@ -234,21 +234,27 @@ void UILayer::refresh_ui()
 	ChargeControlState st = this->ctrl->control_status().control_state;
 	switch (st) {
 		case Device_Disconnected: case Battery_Disconnected:
+			if (this->rec->is_recording()) this->rec->stop();
 			this->button_on_off->set_label("ON");
 			this->button_on_off->set_sensitive(false);
+			this->button_adjust->set_sensitive(true);
 			this->button_calibrate->set_sensitive(st == Battery_Disconnected);
 			this->button_open->set_sensitive(true); this->button_save->set_sensitive(true);
 			break;
 		
 		case Battery_Connected: case Charge_Completed: case Charge_Stopped:
+			if (! this->rec->is_recording()) this->rec->start();
 			this->button_on_off->set_label("ON");
 			this->button_on_off->set_sensitive(true);
+			this->button_adjust->set_sensitive(true);
 			this->button_calibrate->set_sensitive(true);
 			this->button_open->set_sensitive(true); this->button_save->set_sensitive(true);
 			break;
 		
-		case Battery_Charging:
+		case Battery_Charging_CC: case Battery_Charging_CV:
+			if (! this->rec->is_recording()) this->rec->start();
 			this->button_on_off->set_label("OFF");
+			this->button_adjust->set_sensitive(st != Battery_Charging_CV);
 			this->button_calibrate->set_sensitive(true);
 			this->button_open->set_sensitive(false); this->button_save->set_sensitive(false);
 			break;
@@ -269,7 +275,7 @@ void UILayer::on_button_on_off_clicked()
 	ChargeControlState st = this->ctrl->control_status().control_state;
 	if (st == Device_Disconnected || st == Battery_Disconnected) return;
 	
-	if (st != Battery_Charging)
+	if (st != Battery_Charging_CC && st != Battery_Charging_CV)
 		this->ctrl->start_charging();
 	else
 		this->ctrl->stop_charging();
@@ -282,13 +288,22 @@ void UILayer::on_button_on_off_clicked()
 void UILayer::on_button_adjust_clicked()
 {
 	this->infobar->hide();
-	
-	float vol, cur;
+		
+	float vol, cur, chg;
 	if (! user_input_value("Input expected current (mA):", &cur,
-	                       this->ctrl->control_status().exp_current / 1000.0)) return;
+	                       this->ctrl->control_status().exp_current * 1000.0)) return;
 	if (! user_input_value("Input expected voltage (V):", &vol,
 	                       this->ctrl->control_status().exp_voltage)) return;
-	this->ctrl->set_charge_exp(cur / 1000.0, vol);
+	if (! user_input_value("Input expected increment of battery charge (mAh):", &chg,
+	                       this->ctrl->control_status().exp_charge * 1000.0 / 3600.0)) return;
+	
+	Gtk::MessageDialog msg_dlg(*this->window, "Enable const voltage stage?",
+							   false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_YES_NO, true);
+	Gtk::ResponseType resp = (Gtk::ResponseType) msg_dlg.run();
+	msg_dlg.close();
+	
+	this->ctrl->conf.opt_stage_const_v = (resp == Gtk::RESPONSE_YES);
+	this->ctrl->set_charge_exp(cur / 1000.0, vol, chg * 3600.0 / 1000.0);
 }
 
 void UILayer::on_button_calibrate_clicked()
@@ -365,12 +380,18 @@ void UILayer::on_infobar_response(int response)
 	this->infobar->hide();
 }
 
+static void dlg_resp(Gtk::Dialog* dlg, int response_id)
+{
+	dlg->response(response_id);
+}
+
 bool UILayer::user_input_value(const string& str_prompt, float* p_val, float val_default)
 {
-	// strange: while the file dialog can be reused, reuse of the input dialog always cause problem
+	// strange: unlike the file dialog, reuse of the input dialog always cause problem
 	Gtk::Dialog* input_dialog = new Gtk::Dialog("User Input", *this->window, true);
 	Gtk::Label* label_input_dialog = Gtk::manage(new Gtk::Label);
 	Gtk::Entry* entry_input = Gtk::manage(new Gtk::Entry);
+	entry_input->signal_activate().connect(sigc::bind(sigc::ptr_fun(&dlg_resp), input_dialog, Gtk::RESPONSE_OK));
 	input_dialog->get_content_area()->pack_start(*label_input_dialog);
 	input_dialog->get_content_area()->pack_start(*entry_input);
 	input_dialog->add_button("_OK", Gtk::RESPONSE_OK);
