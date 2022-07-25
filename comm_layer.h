@@ -57,13 +57,17 @@ class CommLayer
 {
 	Serialib::Serial serial;
 	volatile bool flag_connected = false;
+	
 	Cmd_ADC_Config adc_conf; float bulk_interval_ms;
 	
 	float vrefint = ADC_VRefInt;
 	float vdda = 3.3; //measured at this layer
-	float vdac = 0.0;
+	steady_clock::time_point t_read_ad_vrefint;
 	
 	thread* thread_comm = NULL; thread* thread_proc = NULL;
+	
+	volatile bool flag_dac_output = false;
+	float vdac = 0.0; volatile uint16_t dac_new_val;
 	
 	char adc_raw_data[ADC_Bulk_Size]; bool flag_data_ready = false;
 	uint16_t adc1_raw_data[ADC_Buffer_Data_Amount], adc2_raw_data[ADC_Buffer_Data_Amount];
@@ -71,10 +75,7 @@ class CommLayer
 	float adc1_value, adc2_value; unsigned int cnt_zero = 0;
     
 	DataCallbackPtr callback_ptr;
-	
-	steady_clock::time_point t_read_ad_vrefint;
-	
-	volatile bool flag_dac_output = false; volatile uint16_t dac_new_val;
+
 	volatile bool flag_shake = false, flag_shake_success = false;
 	volatile bool flag_close = false;
 	

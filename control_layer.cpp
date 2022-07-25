@@ -79,11 +79,13 @@ void ChargeControlLayer::stop_charging()
 		flag_stop = true;
 }
 
+/*------------------------------ private functions ------------------------------*/
+
 void ChargeControlLayer::control_loop()
 {
 	while (true) {
 		if (flag_close) {
-			if (comm.is_connected()) comm.disconnect(); return; //the MCU will stop charging by itself
+			if (comm.is_connected()) comm.disconnect(); return;
 		}
 		
 		if (!check_comm() || !check_shake()) continue;

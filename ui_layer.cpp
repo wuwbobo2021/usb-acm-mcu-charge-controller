@@ -117,7 +117,7 @@ void UILayer::create_window()
 	this->rec->set_interval(Recorder_Interval);
 	this->rec->set_redraw_interval(UI_Refresh_Interval);
 	this->rec->set_option_auto_set_zero_bottom(false);
-	this->rec->set_axis_y_range_length_min(0, 0.4); this->rec->set_axis_y_range_length_min(1, 0.1);
+	this->rec->set_axis_y_range_length_min(0, 0.2); this->rec->set_axis_y_range_length_min(1, 0.1);
 	this->rec->signal_full().connect(sigc::mem_fun(*this, &UILayer::on_buffers_full));
 	this->st_last = this->ctrl->control_status().control_state;
 	if (this->st_last != Device_Disconnected) this->rec->start();
@@ -154,12 +154,12 @@ void UILayer::create_window()
 	label_status->set_width_chars(18); label_status->set_selectable(true);
 	
 	// build framework
-	Gtk::Grid* grid_top = new Gtk::Grid();
-	grid_top->set_halign(Gtk::ALIGN_CENTER);
-	grid_top->set_row_spacing(4); grid_top->set_column_spacing(2);
-	grid_top->attach(*button_on_off, 0, 0, 2, 1);
-	grid_top->attach(*button_config, 0, 1, 1, 1);	grid_top->attach(*button_calibrate, 1, 1, 1, 1);
-	grid_top->attach(*button_open,   0, 2, 1, 1);	grid_top->attach(*button_save,      1, 2, 1, 1);
+	Gtk::Box* bar_conf_cal  = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL)),
+	        * bar_open_save = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL));
+
+	bar_conf_cal->set_spacing(3); bar_open_save->set_spacing(3);
+	bar_conf_cal->pack_start(*button_config); bar_conf_cal->pack_start(*button_calibrate);
+	bar_open_save->pack_start(*button_open); bar_open_save->pack_start(*button_save);
 	
 	Gtk::Grid* grid_param = new Gtk::Grid();
 	grid_param->set_halign(Gtk::ALIGN_CENTER);
@@ -175,7 +175,9 @@ void UILayer::create_window()
 	        * bar = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_VERTICAL));
 	
 	bar->set_border_width(10); bar->set_spacing(10);
-	bar->pack_start(*grid_top, Gtk::PACK_SHRINK);
+	bar->pack_start(*button_on_off, Gtk::PACK_SHRINK);
+	bar->pack_start(*bar_conf_cal, Gtk::PACK_SHRINK);
+	bar->pack_start(*bar_open_save, Gtk::PACK_SHRINK);
 	bar->pack_start(*Gtk::manage(new Gtk::Separator), Gtk::PACK_SHRINK);
 	bar->pack_start(*grid_param, Gtk::PACK_SHRINK);
 	bar->pack_start(*Gtk::manage(new Gtk::Separator), Gtk::PACK_SHRINK);
@@ -187,7 +189,7 @@ void UILayer::create_window()
 	
 	// create window
 	this->window = new Gtk::Window();
-	this->window->set_default_size(900, 650);
+	this->window->set_default_size(900, 700);
 	this->window->add(*box);
 	this->refresh_window_title();
 	this->refresh_ui();
@@ -221,10 +223,11 @@ void UILayer::refresh_ui()
 	ChargeControlState st = this->ctrl->control_status().control_state;
 	
 	if (this->flag_event) {
-		this->flag_event = false; this->flag_show_event = true;
+		this->flag_event = false;
 		if (this->last_event == Event_New_Data) {
 			if (ms_since(t_status_refresh) < UI_Refresh_Interval) return;
 		} else {
+			this->flag_show_event = true;
 			switch (this->last_event) {
 				case Event_Device_Connect: case Event_Battery_Connect:
 					if (st != Battery_Disconnected && !this->rec->is_recording()) this->rec->start();

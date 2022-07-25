@@ -103,7 +103,10 @@ bool CommLayer::shake()
 	if (! flag_connected) return false;
 	
 	flag_shake = true;
-	while (flag_shake) this_thread::sleep_for(milliseconds(1));
+	while (flag_shake) {
+		if (!flag_connected || flag_close) return false;
+		this_thread::sleep_for(milliseconds(1));
+	}
 	
 	return flag_shake_success;
 }
@@ -114,6 +117,8 @@ void CommLayer::dac_output(float val)
 	vdac = val; dac_new_val = from_voltage(val); flag_dac_output = true;
 }
 
+/*------------------------------ private functions ------------------------------*/
+
 void CommLayer::comm_loop()
 {
 	// make sure there is no data to be received while sending shake command for the first time.
@@ -121,6 +126,8 @@ void CommLayer::comm_loop()
 	
 	while (true) {
 		if (flag_close) {
+			dac_new_val = 0;
+			send_cmd(Cmd_ID_DAC_Output, (char*)&dac_new_val, 2);
 			send_cmd_rec_resp(Cmd_ID_ADC_Stop);
 			this_thread::sleep_for(milliseconds(100)); return;
 		}

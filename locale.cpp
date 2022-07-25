@@ -136,8 +136,8 @@ void Locale::set_lang_zh_cn()
 	title_main_window			= "充电监视器";
 	caption_button_on			= "开始";
 	caption_button_off			= "停止";
-	caption_button_config		= "配置. . . ";
-	caption_button_calibrate	= "校准. . . ";
+	caption_button_config		= "配置...";
+	caption_button_calibrate	= "校准...";
 	caption_button_open			= "打开";
 	caption_button_save			= "保存";
 	caption_button_apply		= "应用";
@@ -178,7 +178,7 @@ void Locale::get_control_status_str(const ChargeStatus& st, Glib::ustring& str) 
 		<< "IMax: " << setprecision(0) << st.bat_current_max * 1000.0 << " mA" << endl << endl;
 	
 	if (st.flag_ir_measured)
-		sst << "r : " << setprecision(0) << st.ir * 1000.0 << " mOhm" << endl << endl;
+		sst << "r (DC): " << setprecision(0) << st.ir * 1000.0 << " mOhm" << endl << endl;
 	
 	sst << st.t_charge_start << " " << setprecision(3) << st.bat_voltage_initial << " V" << endl;
 	if (st.control_state == Charge_Completed || st.control_state == Charge_Stopped)
