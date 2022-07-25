@@ -51,7 +51,7 @@ inline DataCallbackPtr MemberFuncDataCallbackPtr(T* pobj)
 const unsigned int Oversampling_Radius = 8,
                    Data_Amount_Per_Av_First = 128,
                    Data_Amount_Per_Av_Second = ADC_Bulk_Data_Amount / Data_Amount_Per_Av_First,
-                   Interval_Read_VRefInt = 30 * 1000;
+                   Interval_Read_VRefInt = 60 * 1000;
 
 class CommLayer
 {
@@ -59,7 +59,9 @@ class CommLayer
 	volatile bool flag_connected = false;
 	Cmd_ADC_Config adc_conf; float bulk_interval_ms;
 	
-	float vdda = 3.3;
+	float vrefint = ADC_VRefInt;
+	float vdda = 3.3; //measured at this layer
+	float vdac = 0.0;
 	
 	thread* thread_comm = NULL; thread* thread_proc = NULL;
 	
@@ -93,19 +95,28 @@ class CommLayer
 	void process_loop();
 	
 public:
-	float vrefint = ADC_VRefInt; 
-	
+	CommLayer();
 	~CommLayer();
 	
 	bool is_connected() const;
+	float data_interval() const;
+	float voltage_vrefint() const;
 	float voltage_vdda() const;
 	
 	bool connect(DataCallbackPtr cb_ptr);
 	void disconnect();
 	bool shake();
+	bool set_voltage_vrefint(float new_vrefint);
 	float vrefint_calibrate(float v_adc1_actual); //returns new estimation of VRefInt
 	void dac_output(float val);
 };
+
+inline CommLayer::CommLayer()
+{
+	adc_conf.Use_VRefInt_For_ADC2 = false;
+	adc_conf.ADC_SampleTime = ADC_SampleTime_601Cycles5;
+	bulk_interval_ms = ADC_Buffer_Data_Amount * adc_raw_data_interval_ms(adc_conf.ADC_SampleTime);
+}
 
 inline CommLayer::~CommLayer()
 {
@@ -117,9 +128,27 @@ inline bool CommLayer::is_connected() const
 	return flag_connected;
 }
 
+inline float CommLayer::data_interval() const
+{
+	return bulk_interval_ms;
+}
+
 inline float CommLayer::voltage_vdda() const
 {
 	return vdda;
+}
+
+inline float CommLayer::voltage_vrefint() const
+{
+	return vrefint;
+}
+
+inline bool CommLayer::set_voltage_vrefint(float new_vrefint)
+{
+	if (new_vrefint < 0.1 || new_vrefint > 4.8) return false;
+	vdda *= new_vrefint / vrefint;
+	vrefint = new_vrefint;
+	return true;
 }
 
 inline float CommLayer::vrefint_calibrate(float v_adc1_actual)

@@ -40,9 +40,7 @@ bool CommLayer::connect(DataCallbackPtr cb_ptr)
 	
 	if (! flag_connected) return false;
 	
-	adc_conf.ADC_SampleTime = ADC_SampleTime_601Cycles5;
-	bulk_interval_ms = ADC_Buffer_Data_Amount * adc_raw_data_interval_ms(adc_conf.ADC_SampleTime);
-	
+	vdac = 0;
 	if (! read_ad_vrefint(true)) {
 		serial.CloseDevice(); return flag_connected = false;
 	}
@@ -59,7 +57,7 @@ bool CommLayer::read_ad_vrefint(bool recover)
 {
 	if (recover) {
 		if (! send_cmd_rec_resp(Cmd_ID_ADC_Stop)) return false;
-		rec_data(10 * bulk_interval_ms);
+		rec_data(bulk_interval_ms + 2000);
 	}
 	
 	// config for VRefInt
@@ -81,7 +79,8 @@ bool CommLayer::read_ad_vrefint(bool recover)
 	
 	if (recover) {
 		if (! send_cmd_rec_resp(Cmd_ID_ADC_Start)) return false;
-		rec_data(bulk_interval_ms + 2000); //flaw: first block received after recovering can be the remaining data
+		rec_data(bulk_interval_ms + 2000);
+		dac_output(vdac);
 	}
 	
 	return true;
@@ -112,7 +111,7 @@ bool CommLayer::shake()
 void CommLayer::dac_output(float val)
 {
 	if (!flag_connected || val < 0 || val > vdda) return;
-	dac_new_val = from_voltage(val); flag_dac_output = true;
+	vdac = val; dac_new_val = from_voltage(val); flag_dac_output = true;
 }
 
 void CommLayer::comm_loop()

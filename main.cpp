@@ -11,7 +11,9 @@ UILayer ui;
 
 int main(int argc, char** argv)
 {
-	ctrl.conf.div_per = 5.41 / (3.04 + 5.41);
+	ChargeControlConfig conf = ctrl.hard_config();
+	conf.div_prop = 5.41 / (3.04 + 5.41);
+	ctrl.set_hard_config(conf);
 	
 	ui.init(&ctrl);
 	ui.run(); //blocks

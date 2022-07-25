@@ -47,7 +47,7 @@
 #define Cmd_ID_Shake 0x03
 #define Cmd_ID_DAC_Output 0x04 //2 bytes of DAC data at right; doesn't expect a response
 #define Cmd_ID_ADC_Stop 0x05
-#define Cmd_ID_Close 0xff
+#define Cmd_ID_Reset 0xff
 
 #define Resp_Check 0x20220531 //0x 31 05 22 20
 #define Resp_OK 0x00
