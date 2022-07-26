@@ -54,6 +54,8 @@ class UILayer: public sigc::trackable
 	bool flag_event = false, flag_show_event = false; ChargeControlState st_last;
 	steady_clock::time_point t_status_refresh;
 	
+	bool flag_saving = false;
+	
 	void create_window();
 	void create_file_dialog();
 	void app_run();

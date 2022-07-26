@@ -230,7 +230,7 @@ void UILayer::refresh_ui()
 			this->flag_show_event = true;
 			switch (this->last_event) {
 				case Event_Device_Connect: case Event_Battery_Connect:
-					if (st != Battery_Disconnected && !this->rec->is_recording()) this->rec->start();
+					if (!this->rec->is_recording() && st != Battery_Disconnected) this->rec->start();
 					break;
 				
 				case Event_Device_Disconnect: case Event_Battery_Disconnect:
@@ -367,8 +367,6 @@ void UILayer::on_button_open_clicked()
 
 void UILayer::on_button_save_clicked()
 {
-	flag_show_event = false;
-	
 	using Glib::str_has_suffix;
 	#ifdef _WIN32
 		const string Slash = "\\";
@@ -376,15 +374,20 @@ void UILayer::on_button_save_clicked()
 		const string Slash = "/";
 	#endif
 	
-	bool prev_recording = this->rec->is_recording();
-	if (prev_recording) this->rec->stop();
+	flag_show_event = false;
+	
+	system_clock::time_point t_file;
+	if (this->ctrl->control_status().t_charge_start == t_file) //t_charge_start is not set
+		t_file = system_clock::now();
+	else
+		t_file = this->ctrl->control_status().t_charge_start;
+	
+	const time_t t_c = system_clock::to_time_t(t_file);
+	sst.clear(); sst.str("");
+	sst << put_time(localtime(&t_c), "%Y_%m_%d_%H_%M_%S");
 	
 	this->file_dialog->set_title(locale_str.title_dialog_save_file);
 	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_SAVE);
-	
-	const time_t t_c = system_clock::to_time_t(system_clock::now());
-	sst.clear(); sst.str("");
-	sst << put_time(localtime(&t_c), "%Y_%m_%d_%H_%M_%S");
 	this->file_dialog->set_current_name(sst.str());
 	
 	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
@@ -396,7 +399,10 @@ void UILayer::on_button_save_clicked()
 	path += this->file_dialog->get_current_name();
 	if (! str_has_suffix(path, ".csv")) path += ".csv"; 
 	
+	bool prev_recording = this->rec->is_recording();
+	if (prev_recording) this->rec->stop();
 	bool suc = this->rec->save_csv(path);
+	
 	if (! suc) {
 		Gtk::MessageDialog msg_dlg(*this->window, locale_str.message_failed_to_save_file, 
 	                               false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
