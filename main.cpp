@@ -30,9 +30,11 @@ int main(int argc, char** argv)
 	ui.init(&ctrl);
 	ui.run(); //blocks
 	
-	conf = ctrl.hard_config();
-	ofstream ofs(path + conf_file_name, ios::binary | ios::trunc);
-	if (ofs) ofs.write((char*)&conf, sizeof(conf));
+	if (ctrl.hard_config() != conf) { //config changed
+		conf = ctrl.hard_config();
+		ofstream ofs(path + conf_file_name, ios::binary | ios::trunc);
+		if (ofs) ofs.write((char*)&conf, sizeof(conf));
+	}
 	
 	return 0;
 }

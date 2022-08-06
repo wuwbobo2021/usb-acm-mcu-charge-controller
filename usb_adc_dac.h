@@ -35,8 +35,6 @@
 #define ADC_Bulk_Data_Amount (ADC_Buffer_Data_Amount / 2)
 
 #define DAC_Raw_Value_Max 4095
-#define DAC_Voltage_Min 0.2
-#define DAC_Voltage_Max 3.1
 
 #define Cmd_Header_Length 4
 #define Cmd_Header 0x0000ffff //0x ff ff 00 00

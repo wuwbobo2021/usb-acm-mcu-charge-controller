@@ -104,20 +104,24 @@ void UILayer::create_window()
 {
 	//initialize the recorder
 	vector<VariableAccessPtr> ptrs;
-	VariableAccessPtr ptr1(ctrl->battery_voltage_ptr()),
-	                  ptr2(ctrl->battery_current_ptr());
+	VariableAccessPtr ptr1(& ctrl->control_status_ptr()->bat_voltage),
+	                  ptr2(& ctrl->control_status_ptr()->bat_current);
 	ptr1.color_plot.set_rgba(0.0, 0.5, 0.5);
 	ptr2.color_plot.set_rgba(1.0, 0.0, 0.0);
-	ptr1.name_csv = "bat_voltage"; ptr1.unit_name = "V"; ptr1.name_friendly = locale_str.name_bat_voltage;
-	ptr2.name_csv = "bat_current"; ptr2.unit_name = "A"; ptr2.name_friendly = locale_str.name_bat_current;
+	ptr1.name_csv = "bat_voltage"; ptr1.precision_csv = 3;
+	ptr2.name_csv = "bat_current"; ptr2.precision_csv = 3;
+	ptr1.unit_name = "V"; ptr1.name_friendly = locale_str.name_bat_voltage;
+	ptr2.unit_name = "A"; ptr2.name_friendly = locale_str.name_bat_current;
 	ptrs.push_back(ptr1); ptrs.push_back(ptr2);
 	
 	this->rec = Gtk::manage(new Recorder(ptrs, this->buf_size));
-	this->rec->set_index_range((unsigned int)(30 * 60 * 1000.0 / this->ctrl->data_interval()) - 1);
 	this->rec->set_interval(Recorder_Interval);
 	this->rec->set_redraw_interval(UI_Refresh_Interval);
-	this->rec->set_option_auto_set_zero_bottom(false);
-	this->rec->set_axis_y_range_length_min(0, 0.2); this->rec->set_axis_y_range_length_min(1, 0.1);
+	this->rec->set_index_range((unsigned int)(30 * 60 * 1000.0 / this->ctrl->data_interval()) - 1);
+	this->rec->set_option_auto_extend_index_range(true);
+	this->rec->set_option_axis_x_int_values(true);
+	this->rec->set_y_range_length_min(0, 0.4); this->rec->set_option_auto_set_zero_bottom(0, false); //bat_voltage
+	this->rec->set_y_range_length_min(1, 0.1); //bat_current
 	this->rec->signal_full().connect(sigc::mem_fun(*this, &UILayer::on_buffers_full));
 	this->st_last = this->ctrl->control_status().control_state;
 	if (this->st_last != Device_Disconnected) this->rec->start();
@@ -213,6 +217,7 @@ void UILayer::control_event_callback(ChargeControlEvent ev)
 {
 	if (! this->window) return;
 	if (! this->window->get_visible()) return;
+	if (this->ctrl->control_status().control_state == DAC_Scanning) return;
 	
 	this->flag_event = true; this->last_event = ev;
 	this->dispatcher_refresh->emit();
@@ -266,6 +271,8 @@ void UILayer::refresh_ui()
 			this->button_open->set_sensitive(false); this->button_save->set_sensitive(false);
 			this->window->set_title(locale_str.window_title(st));
 			break;
+		
+		default: break;
 	}
 	
 	refresh_window_title();
@@ -293,10 +300,6 @@ void UILayer::on_button_on_off_clicked()
 		this->ctrl->start_charging();
 	else
 		this->ctrl->stop_charging();
-	
-	this_thread::sleep_for(milliseconds(200));
-	this->refresh_ui();
-
 }
 
 inline std::string float_to_str(float val, std::stringstream& sst)
@@ -335,6 +338,33 @@ void UILayer::on_button_calibrate_clicked()
 	msg_dlg.run(); msg_dlg.close();
 }
 
+void UILayer::on_button_open_clicked()
+{
+	flag_show_event = false;
+	open_file(this->rec);
+}
+
+void UILayer::on_button_save_clicked()
+{
+	flag_show_event = false;
+	
+	system_clock::time_point t_file;
+	if (this->ctrl->control_status().t_charge_start == t_file) //t_charge_start is not set
+		t_file = system_clock::now();
+	else
+		t_file = this->ctrl->control_status().t_charge_start;
+	
+	const time_t t_c = system_clock::to_time_t(t_file);
+	sst.clear(); sst.str("");
+	sst << put_time(localtime(&t_c), "%Y_%m_%d_%H_%M_%S");
+	
+	ustring str_st; locale_str.get_control_status_str(this->ctrl->control_status(), str_st);
+	
+	bool prev_recording = this->rec->is_recording();
+	if (save_as_file(this->rec, sst.str(), str_st))
+		if (prev_recording) this->rec->start();
+}
+
 void UILayer::on_button_apply_clicked()
 {
 	flag_show_event = false;
@@ -348,68 +378,6 @@ void UILayer::on_button_apply_clicked()
 	this->ctrl->set_charge_param(param);
 	
 	show_param_values(); //in case of some of the input values are invalid
-}
-
-void UILayer::on_button_open_clicked()
-{
-	flag_show_event = false;
-	if (this->rec->is_recording()) this->rec->stop();
-	
-	this->file_dialog->set_title(locale_str.title_dialog_open_file);
-	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_OPEN);
-	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
-	this->file_dialog->close();
-	if (resp != Gtk::RESPONSE_OK) return;
-	
-	string path = this->file_dialog->get_file()->get_path();
-	this->rec->open_csv(path);
-}
-
-void UILayer::on_button_save_clicked()
-{
-	using Glib::str_has_suffix;
-	#ifdef _WIN32
-		const string Slash = "\\";
-	#else
-		const string Slash = "/";
-	#endif
-	
-	flag_show_event = false;
-	
-	system_clock::time_point t_file;
-	if (this->ctrl->control_status().t_charge_start == t_file) //t_charge_start is not set
-		t_file = system_clock::now();
-	else
-		t_file = this->ctrl->control_status().t_charge_start;
-	
-	const time_t t_c = system_clock::to_time_t(t_file);
-	sst.clear(); sst.str("");
-	sst << put_time(localtime(&t_c), "%Y_%m_%d_%H_%M_%S");
-	
-	this->file_dialog->set_title(locale_str.title_dialog_save_file);
-	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_SAVE);
-	this->file_dialog->set_current_name(sst.str());
-	
-	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
-	this->file_dialog->close();
-	if (resp != Gtk::RESPONSE_OK) return;
-	
-	string path = this->file_dialog->get_current_folder();
-	if (! str_has_suffix(path, Slash)) path += Slash;
-	path += this->file_dialog->get_current_name();
-	if (! str_has_suffix(path, ".csv")) path += ".csv"; 
-	
-	bool prev_recording = this->rec->is_recording();
-	if (prev_recording) this->rec->stop();
-	bool suc = this->rec->save_csv(path);
-	
-	if (! suc) {
-		Gtk::MessageDialog msg_dlg(*this->window, locale_str.message_failed_to_save_file, 
-	                               false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
-	    msg_dlg.run(); msg_dlg.close();
-	}
-	
-	if (prev_recording) this->rec->start();
 }
 
 void UILayer::on_chk_stage_const_v_toggled()
@@ -460,10 +428,59 @@ bool UILayer::user_input_value(const string& str_prompt, float* p_val, float val
 	if (resp == Gtk::RESPONSE_OK) {
 		sst.clear(); sst.sync();
 		sst.str(entry_input->get_text()); sst >> *p_val;
-		if (!sst.fail()) suc = true;
+		if (! sst.fail()) suc = true;
 		else sst.clear();
 	}
 	delete input_dialog;
+	return suc;
+}
+
+bool UILayer::open_file(Recorder* recorder)
+{
+	if (recorder->is_recording()) recorder->stop();
+	
+	this->file_dialog->set_title(locale_str.title_dialog_open_file);
+	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_OPEN);
+	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
+	this->file_dialog->close();
+	if (resp != Gtk::RESPONSE_OK) return false;
+	
+	string path = this->file_dialog->get_file()->get_path();
+	return recorder->open_csv(path);
+}
+
+bool UILayer::save_as_file(Recorder* recorder, const string& file_name_default, const string& comment)
+{
+	using Glib::str_has_suffix;
+	#ifdef _WIN32
+		const string Slash = "\\";
+	#else
+		const string Slash = "/";
+	#endif
+	
+	this->file_dialog->set_title(locale_str.title_dialog_save_file);
+	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_SAVE);
+	this->file_dialog->set_current_name(file_name_default);
+	
+	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
+	this->file_dialog->hide(); this->file_dialog->close();
+	if (resp != Gtk::RESPONSE_OK) return false;
+	
+	string path = this->file_dialog->get_current_folder();
+	if (! str_has_suffix(path, Slash)) path += Slash;
+	path += this->file_dialog->get_current_name();
+	if (! str_has_suffix(path, ".csv")) path += ".csv"; 
+	
+	if (recorder->is_recording())
+		recorder->stop();
+	bool suc = recorder->save_csv(path, comment);
+	
+	if (! suc) {
+		Gtk::MessageDialog msg_dlg(*this->window, locale_str.message_failed_to_save_file, 
+	                               false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+	    msg_dlg.run(); msg_dlg.close();
+	}
+	
 	return suc;
 }
 
@@ -473,7 +490,7 @@ void UILayer::on_button_config_clicked()
 	
 	ChargeControlConfig conf = this->ctrl->hard_config();
 	
-	Gtk::Dialog* config_dialog = new Gtk::Dialog(locale_str.caption_button_config, *this->window, true);
+	Gtk::Dialog* config_dialog = new Gtk::Dialog(locale_str.title_dialog_config, *this->window, true);
 	
 	Gtk::Label* label_v_refint = Gtk::manage(new Gtk::Label(locale_str.name_v_refint, Gtk::ALIGN_START));
 	Gtk::Label* label_v_ext_power = Gtk::manage(new Gtk::Label(locale_str.name_v_ext_power, Gtk::ALIGN_START));
@@ -530,13 +547,17 @@ void UILayer::on_button_config_clicked()
 	grid_config->attach(*label_v_dac_adj_step,  0, 9, 1, 1); grid_config->attach(*entry_v_dac_adj_step,  1, 9, 1, 1);
 	grid_config->attach(*label_v_bat_dec_th,    0,10, 1, 1); grid_config->attach(*entry_v_bat_dec_th,    1,10, 1, 1);
 	
+	const int Response_DAC_Scan = 111;
+	
 	config_dialog->get_content_area()->pack_start(*grid_config);
+	config_dialog->add_button(locale_str.caption_button_dac_scan, Response_DAC_Scan);
 	config_dialog->add_button(locale_str.caption_button_ok, Gtk::RESPONSE_OK);
 	config_dialog->add_button(locale_str.caption_button_cancel, Gtk::RESPONSE_CANCEL);
 	config_dialog->show_all_children();
 	
 	while (true) {
 		Gtk::ResponseType resp = (Gtk::ResponseType) config_dialog->run();
+		if (resp == Response_DAC_Scan) {this->dac_scan(*config_dialog); continue;}
 		if (resp != Gtk::RESPONSE_OK) break;
 		
 		conf.v_refint = str_to_float(entry_v_refint->get_text(), conf.v_refint, sst);
@@ -560,7 +581,72 @@ void UILayer::on_button_config_clicked()
 		}
 	}
 	
+	config_dialog->close();
 	delete config_dialog;
+}
+
+void UILayer::dac_scan(Gtk::Window& parent_window)
+{
+	Gtk::Dialog* dac_scan_dialog = new Gtk::Dialog(locale_str.title_dialog_dac_scan, parent_window, true);
+	
+	vector<VariableAccessPtr> ptrs;
+	const ChargeStatus* p_st = this->ctrl->control_status_ptr();
+	VariableAccessPtr ptr_v_bat(& p_st->bat_voltage),
+	                  ptr_v_dac(& p_st->dac_voltage),
+	                  ptr_i_bat(& p_st->bat_current);
+	ptr_v_bat.color_plot.set_rgba(0.0, 0.5, 0.5);
+	ptr_v_dac.color_plot.set_rgba(0.6, 0.3, 0.0);
+	ptr_i_bat.color_plot.set_rgba(1.0, 0.0, 0.0);
+	ptr_v_bat.name_csv = "bat_voltage"; ptr_v_bat.precision_csv = 3;
+	ptr_v_dac.name_csv = "dac_voltage"; ptr_v_dac.precision_csv = 3;
+	ptr_i_bat.name_csv = "bat_current"; ptr_i_bat.precision_csv = 3;
+	ptr_v_bat.unit_name = "V"; ptr_v_bat.name_friendly = locale_str.name_bat_voltage;
+	ptr_v_dac.unit_name = "V"; ptr_v_dac.name_friendly = locale_str.name_dac_voltage;
+	ptr_i_bat.unit_name = "A"; ptr_i_bat.name_friendly = locale_str.name_bat_current;
+	ptrs.push_back(ptr_v_bat); ptrs.push_back(ptr_v_dac); ptrs.push_back(ptr_i_bat);
+	
+	Recorder* rec_dac_scan = Gtk::manage(new Recorder(ptrs, DAC_Raw_Value_Max));
+	rec_dac_scan->set_interval(Recorder_Interval);
+	rec_dac_scan->set_index_range(DAC_Raw_Value_Max);
+	rec_dac_scan->set_option_record_until_full(true);
+	
+	const int Response_Open = 112, Response_Save = 113;
+	
+	dac_scan_dialog->set_default_size(900, 700);
+	dac_scan_dialog->get_content_area()->pack_start(*rec_dac_scan);
+	dac_scan_dialog->add_button(locale_str.caption_button_open, Response_Open);
+	dac_scan_dialog->add_button(locale_str.caption_button_save, Response_Save);
+	dac_scan_dialog->add_button(locale_str.caption_button_close, Gtk::RESPONSE_CLOSE);
+	dac_scan_dialog->show_all_children();
+	
+	if (this->ctrl->dac_scan()) {
+		if (this->rec->is_recording()) this->rec->stop();
+		rec_dac_scan->start();
+	}
+	
+	while (true) {
+		Gtk::ResponseType resp = (Gtk::ResponseType) dac_scan_dialog->run();
+		
+		if (rec_dac_scan->is_recording())
+			rec_dac_scan->stop();
+		if (this->ctrl->control_status().control_state == DAC_Scanning)
+			this->ctrl->stop_dac_scan();
+		
+		if (resp == Response_Open)
+			open_file(rec_dac_scan);
+		else if (resp == Response_Save) {
+			const time_t t_c = system_clock::to_time_t(system_clock::now());
+			sst.clear(); sst.str("");
+			sst << put_time(localtime(&t_c), "%Y_%m_%d_%H_%M_%S");
+			save_as_file(rec_dac_scan, "DAC_Scan_" + sst.str(), "--------------------------------");
+		}
+		else break;
+	}
+	
+	dac_scan_dialog->hide();
+	dac_scan_dialog->get_content_area()->remove(*rec_dac_scan);
+	dac_scan_dialog->close();
+	delete dac_scan_dialog;
 }
 
 void UILayer::close_window() //used by dispatcher_close

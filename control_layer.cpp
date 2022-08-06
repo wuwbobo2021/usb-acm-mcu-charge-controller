@@ -41,9 +41,8 @@ bool ChargeControlLayer::set_hard_config(ChargeControlConfig new_conf)
 bool ChargeControlLayer::set_charge_param(ChargeParameters new_param)
 {
 	if (new_param.exp_current < 0.009
-	||  new_param.exp_voltage < conf.v_bat_detect_th + 0.1
-	||  new_param.exp_charge < 1.0
-	||  (status.control_state == Charge_Completed && new_param.exp_voltage <= param.exp_voltage))
+	||  new_param.exp_voltage < status.bat_voltage
+	||  new_param.exp_charge < 1.0)
 		return false;
 	
 	param = new_param;
@@ -61,6 +60,22 @@ void ChargeControlLayer::calibrate(float v_bat_actual)
 	float v_adc1_actual = (conf.v_ext_power - v_bat_actual - status.bat_current * conf.r_extra)
 	                    * conf.div_prop;
 	conf.v_refint = comm.vrefint_calibrate(v_adc1_actual);
+}
+
+bool ChargeControlLayer::dac_scan()
+{
+	if (status.control_state != Battery_Connected
+	&&  status.control_state != Charge_Completed
+	&&  status.control_state != Charge_Stopped)
+		return false;
+	
+	return flag_dac_scan = true;
+}
+
+void ChargeControlLayer::stop_dac_scan()
+{
+	if (status.control_state == DAC_Scanning)
+		flag_stop_dac_scan = true;
 }
 
 bool ChargeControlLayer::start_charging()
@@ -95,18 +110,31 @@ void ChargeControlLayer::control_loop()
 		
 		if (flag_start) {
 			flag_start = false;
-			cnt_v_dec = cnt_v_max_detect = 0;
+			cnt_i_min = cnt_v_dec = cnt_v_max_detect = 0;
 			float v = status.bat_voltage;
 			status.reset();
 			status.control_state = Battery_Charging_CC;
 			status.bat_voltage_max = status.bat_voltage_initial = status.bat_voltage = v;
 			status.t_bat_voltage_max = steady_clock::now();
 			status.t_charge_start = system_clock::now();
-			this_thread::sleep_for(milliseconds(10));
 		}
 		else if (flag_stop) {
 			do_stop_charging(true); flag_stop = false;
 			status.control_state = Charge_Stopped;
+		}
+		else if (flag_dac_scan) {
+			flag_dac_scan = false;
+			float v = status.bat_voltage;
+			status.reset();
+			status.control_state = DAC_Scanning; status.bat_voltage = v;
+			comm.opt_measure_vdda = false; //measuring of vdda causes interruption
+			comm.dac_output(status.dac_voltage = 0);
+		}
+		else if (flag_stop_dac_scan) {
+			flag_stop_dac_scan = false;
+			comm.dac_output(status.dac_voltage = 0);
+			comm.opt_measure_vdda = true;
+			status.control_state = Battery_Connected;
 		}
 		else if (status.control_state == Battery_Charging_CC || status.control_state == Battery_Charging_CV) {
 			// check for emergency stop
@@ -119,24 +147,22 @@ void ChargeControlLayer::control_loop()
 				measure_ir(); continue;
 			}
 			
-			// check for voltage decline
-			if ((status.bat_current > param.exp_current * 4.0 / 5.0 || status.dac_voltage == DAC_Voltage_Max)
-			&&  status.bat_voltage_max - status.bat_voltage >= conf.v_bat_dec_th)
-				cnt_v_dec++;
-			else
-				cnt_v_dec = 0;
-			
-			// check for completion
-			if (status.bat_charge >= param.exp_charge || cnt_v_dec > 20) {
+			// check for expected charge
+			if (status.bat_charge >= param.exp_charge) {
 				complete_charging(); continue;
 			}
 			
-			bool p_mos_reached_max = (status.mos_power > conf.p_mos_max);	
 			float dac_voltage = status.dac_voltage;
-					
+			int cnt_steps = 0;
+			
+			// check for MOS dissipated power
+			bool p_mos_reached_max = (status.mos_power > conf.p_mos_max);
+			if (p_mos_reached_max)
+				cnt_steps = -3.0 * status.mos_power / conf.p_mos_max;
+			
 			// const current stage
 			if (status.control_state == Battery_Charging_CC) {
-				// check for battery voltage
+				// check for expected voltage
 				if (status.bat_voltage >= param.exp_voltage) {
 					if (! param.opt_stage_const_v)
 						complete_charging();
@@ -145,41 +171,67 @@ void ChargeControlLayer::control_loop()
 					continue;
 				}
 				
+				// check for voltage decline
+				if (status.bat_voltage_max - status.bat_voltage >= conf.v_bat_dec_th) {
+					cnt_v_dec++;
+					if (cnt_v_dec == 1)
+						i_dec_start = status.bat_current;
+					if (cnt_v_dec == 20)
+						if (status.bat_current - i_dec_start < -0.01) cnt_v_dec = 0;
+				} else
+					cnt_v_dec = 0;
+				if (cnt_v_dec >= 20) {
+					complete_charging(); continue;
+				}
+				
 				// current adjustment
 				float diff_current = status.bat_current - param.exp_current;
-				if (p_mos_reached_max)
-					dac_voltage -= conf.v_dac_adj_step * 3.0 * status.mos_power / conf.p_mos_max;
-				else if (diff_current > 0.003)
-					dac_voltage -= conf.v_dac_adj_step * (diff_current / 0.006);
-				else if (diff_current < -0.003)
-					dac_voltage += conf.v_dac_adj_step * (-diff_current / 0.006);
+				if (!p_mos_reached_max)
+					cnt_steps = -diff_current / 0.003;
 			}
 			
 			// const voltage stage
 			else {
 				// check for low current threshold
-				if (dac_voltage == 0 || status.bat_current < param.min_current) {
+				if (status.bat_current < param.min_current)
+					cnt_i_min++;
+				else
+					cnt_i_min = 0;
+				
+				if (dac_voltage == 0 || cnt_i_min >= 10) {
 					complete_charging(); continue;
-				} else if (p_mos_reached_max)
-					dac_voltage -= conf.v_dac_adj_step * status.mos_power / conf.p_mos_max;
-				else {
+				} else {
 					 // current should be lower when the internal resistance of the battery become higher
 					float diff_voltage = status.bat_voltage - param.exp_voltage;
-					if (diff_voltage > 0.002)
-						dac_voltage -= conf.v_dac_adj_step;
+					if (!p_mos_reached_max && diff_voltage > 0.002)
+						cnt_steps = -1;
 				}
 			}
 			
-			// apply the adjusted DAC voltage value
-			if (dac_voltage < 0) dac_voltage = 0;
-			if (dac_voltage > DAC_Voltage_Max) dac_voltage = DAC_Voltage_Max;
+			if (cnt_steps > 15) cnt_steps = 15; if (cnt_steps < -15) cnt_steps = -15;
+			
+			// apply DAC voltage adjustment
+			dac_voltage += cnt_steps * conf.v_dac_adj_step;
+			if (dac_voltage < conf.v_dac_adj_step) dac_voltage = conf.v_dac_adj_step;
+			if (dac_voltage > comm.voltage_vdda()) dac_voltage = comm.voltage_vdda();
 			if (dac_voltage != status.dac_voltage) {
 				comm.dac_output(dac_voltage);
 				status.dac_voltage = dac_voltage;
 			}
 		}
+		else if (status.control_state == DAC_Scanning) {
+			if (status.dac_voltage >= comm.voltage_vdda()) {
+				comm.dac_output(status.dac_voltage = 0);
+				comm.opt_measure_vdda = true;
+				status.control_state = Battery_Connected;
+				event_callback_ptr.call(Event_Scan_Complete);
+			}
+			status.dac_voltage += conf.v_dac_adj_step;
+			comm.dac_output(status.dac_voltage);
+		}
 		else {
-			this_thread::sleep_for(milliseconds(100)); //idle
+			comm.dac_output(status.dac_voltage = 0);
+			this_thread::sleep_for(milliseconds(400)); //idle
 		}
 	}
 }
@@ -269,11 +321,14 @@ bool ChargeControlLayer::measure_ir()
 	if (status.control_state != Battery_Charging_CC && status.control_state != Battery_Charging_CV) return false;
 	if (status.bat_current < 0.01) return false;
 	
+	comm.opt_measure_vdda = false;
 	comm.shake();
 	float bat_voltage_prev = status.bat_voltage, bat_current_prev = status.bat_current;
 	while (status.bat_current > bat_current_prev / 5.0) {
 		check_shake(); comm.dac_output(0);
-		if (! wait_for_new_data()) return false;
+		if (! wait_for_new_data()) {
+			comm.opt_measure_vdda = true; return false;
+		}
 	}
 	
 	status.ir =   (bat_voltage_prev - status.bat_voltage)
@@ -285,6 +340,7 @@ bool ChargeControlLayer::measure_ir()
 		if (! wait_for_new_data()) break;
 	}
 	
+	comm.opt_measure_vdda = true;
 	return true;
 }
 

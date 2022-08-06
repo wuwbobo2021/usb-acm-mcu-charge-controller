@@ -45,7 +45,7 @@ void Locale::set_lang_en()
 	name_exp_current			= "Exp Current (mA):";
 	name_exp_voltage			= "Exp Voltage (V):";
 	name_exp_charge				= "Exp Charge (mAh):";
-	name_opt_stage_const_v		= "Const-Voltage Stage";
+	name_opt_stage_const_v		= "Const-V Stage (Li-ion)";
 	name_min_current			= "Min Current (mA):";
 	
 	state_device_disconnected	= "Connecting...";
@@ -67,6 +67,7 @@ void Locale::set_lang_en()
 	event_buffer_full			= "Record buffer is full...";
 	
 	name_bat_voltage			= "Battery Voltage";
+	name_dac_voltage            = "DAC Output Voltage";
 	name_bat_current			= "Charge Current";
 	
 	title_main_window			= "Charge Monitor";
@@ -74,21 +75,25 @@ void Locale::set_lang_en()
 	caption_button_off			= "OFF";
 	caption_button_config		= "  Config...  ";
 	caption_button_calibrate	= "Calibrate...";
-	caption_button_open			= "Open";
-	caption_button_save			= "Save";
+	caption_button_open			= "Open...";
+	caption_button_save			= "Save...";
 	caption_button_apply		= "Apply";
 	
 	title_dialog_input          = "Input Value";
 	message_input_v_bat			= "Input your measurement of battery voltage (V):";
 	message_report_vrefint		= "On-chip VRefInt is calculated:";
 	
+	title_dialog_config         = "Config";
+	title_dialog_dac_scan       = "DAC Scan";
+	caption_button_ok			= "_OK";
+	caption_button_cancel		= "_Cancel";
+	caption_button_dac_scan     = "DAC _Scan...";
+	caption_button_close        = "_Close";
 	message_invalid_input		= "Invalid input.";
 	
 	title_dialog_open_file		= "Open CSV File";
 	title_dialog_save_file		= "Save As CSV File (Interval: 0.1 s)";
 	name_file_filter_csv		= "CSV Files (.csv)";
-	caption_button_ok			= "_OK";
-	caption_button_cancel		= "_Cancel";
 	message_failed_to_save_file = "Failed to save as file.";
 }
 
@@ -109,7 +114,7 @@ void Locale::set_lang_zh_cn()
 	name_exp_current			= "电流设定 (mA):";
 	name_exp_voltage			= "电压限定 (V):";
 	name_exp_charge				= "充入电量 (mAh):";
-	name_opt_stage_const_v		= "恒压阶段";
+	name_opt_stage_const_v		= "恒压阶段 (锂电池)";
 	name_min_current			= "最小电流 (mA):";
 	
 	state_device_disconnected	= "正在寻找设备...";
@@ -131,28 +136,34 @@ void Locale::set_lang_zh_cn()
 	event_buffer_full			= "数据已满...";
 	
 	name_bat_voltage			= "电池电压";
+	name_dac_voltage            = "DAC 输出电压";
 	name_bat_current			= "充电电流";
 	
 	title_main_window			= "充电监视器";
 	caption_button_on			= "开始";
 	caption_button_off			= "停止";
 	caption_button_config		= "配置...";
+
 	caption_button_calibrate	= "校准...";
-	caption_button_open			= "打开";
-	caption_button_save			= "保存";
+	caption_button_open			= "打开...";
+	caption_button_save			= "保存...";
 	caption_button_apply		= "应用";
 	
 	title_dialog_input          = "输入";
 	message_input_v_bat			= "输入电池实际电压 (V):";
 	message_report_vrefint		= "单片机内部参考电压计算值:";
 	
+	title_dialog_config         = "配置";
+	title_dialog_dac_scan       = "DAC 扫描";
+	caption_button_ok			= "确定(_O)";
+	caption_button_cancel		= "取消(_C)";
+	caption_button_dac_scan     = "DAC 扫描(_S)...";
+	caption_button_close        = "关闭(_C)";
 	message_invalid_input		= "无效输入。";
 	
 	title_dialog_open_file		= "打开 CSV 文件";
 	title_dialog_save_file		= "保存为 CSV 文件 (数据间隔为 0.1 s)";
 	name_file_filter_csv		= "CSV 文件 (.csv)";
-	caption_button_ok			= "确定(_O)";
-	caption_button_cancel		= "取消(_C)";
 	message_failed_to_save_file = "保存文件失败。";
 }
 

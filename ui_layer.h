@@ -21,7 +21,7 @@
 using namespace std;
 
 const unsigned int Recorder_Interval   = 100, //ms
-                   UI_Refresh_Interval = 500;
+                   UI_Refresh_Interval = 1000;
 
 class UILayer: public sigc::trackable
 {
@@ -54,8 +54,6 @@ class UILayer: public sigc::trackable
 	bool flag_event = false, flag_show_event = false; ChargeControlState st_last;
 	steady_clock::time_point t_status_refresh;
 	
-	bool flag_saving = false;
-	
 	void create_window();
 	void create_file_dialog();
 	void app_run();
@@ -76,6 +74,10 @@ class UILayer: public sigc::trackable
 	
 	bool user_input_value(const string& str_prompt, float* p_val, float val_default = 0); 
 	void show_param_values();
+	
+	bool open_file(SimpleCairoPlot::Recorder* recorder);
+	bool save_as_file(SimpleCairoPlot::Recorder* recorder, const string& file_name_default, const string& comment);
+	void dac_scan(Gtk::Window& parent_window);
 	
 	void close_window();
 	

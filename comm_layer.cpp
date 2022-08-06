@@ -57,7 +57,7 @@ bool CommLayer::read_ad_vrefint(bool recover)
 {
 	if (recover) {
 		if (! send_cmd_rec_resp(Cmd_ID_ADC_Stop)) return false;
-		rec_data(bulk_interval_ms + 2000);
+		rec_data(bulk_interval_ms + Timeout_Data_Max);
 	}
 	
 	// config for VRefInt
@@ -66,7 +66,7 @@ bool CommLayer::read_ad_vrefint(bool recover)
 	
 	// read VRefInt
 	if (! send_cmd_rec_resp(Cmd_ID_ADC_Start)) return false;
-	if (! rec_data(bulk_interval_ms + 2000)) return false;
+	if (! rec_data(bulk_interval_ms + Timeout_Data_Max)) return false;
 	if (! send_cmd_rec_resp(Cmd_ID_ADC_Stop)) return false;
 	process_data();
 	vdda = vrefint * ADC_Raw_Value_Max / adc2_value;
@@ -79,7 +79,7 @@ bool CommLayer::read_ad_vrefint(bool recover)
 	
 	if (recover) {
 		if (! send_cmd_rec_resp(Cmd_ID_ADC_Start)) return false;
-		rec_data(bulk_interval_ms + 2000);
+		rec_data(bulk_interval_ms + Timeout_Data_Max);
 		dac_output(vdac);
 	}
 	
@@ -103,9 +103,10 @@ bool CommLayer::shake()
 	if (! flag_connected) return false;
 	
 	flag_shake = true;
-	while (flag_shake) {
+	unsigned int cnt_ms = 0;
+	while (flag_shake && cnt_ms < 2*Timeout_Data_Max) {
 		if (!flag_connected || flag_close) return false;
-		this_thread::sleep_for(milliseconds(1));
+		this_thread::sleep_for(milliseconds(1)); cnt_ms++;
 	}
 	
 	return flag_shake_success;
@@ -141,10 +142,11 @@ void CommLayer::comm_loop()
 			flag_shake = false;
 		}
 		
-		if (steady_clock::now() - t_read_ad_vrefint > milliseconds(Interval_Read_VRefInt))
+		if (opt_measure_vdda
+		&&  steady_clock::now() - t_read_ad_vrefint > milliseconds(Interval_Read_VRefInt))
 			read_ad_vrefint(true);
 		
-		if (rec_data(bulk_interval_ms + 2000))
+		if (rec_data(bulk_interval_ms + Timeout_Data_Max))
 			flag_data_ready = true;
 		else {
 			if (send_cmd_rec_resp(Cmd_ID_ADC_Start) == true) continue;
@@ -157,15 +159,19 @@ void CommLayer::process_loop()
 {
 	while (true) {
 		this_thread::sleep_for(milliseconds(1));
+		
 		if (flag_close || !flag_connected) return;
 		if (! flag_data_ready) continue;
+		
 		flag_data_ready = false;
 		process_data();
+		
 		if (adc1_value == 0 && adc2_value == 0) {
 			cnt_zero++;
 			if (cnt_zero < 3) continue;
 		} else
 			cnt_zero = 0;
+		
 		callback_ptr.call(get_voltage(adc1_value), get_voltage(adc2_value));
 	}
 }
@@ -175,7 +181,7 @@ bool CommLayer::send_cmd_rec_resp(char cmd_id, const char* data_extra, uint32_t 
 	for (int cnt_try = 5; cnt_try > 0; cnt_try--) {
 		if (! send_cmd(cmd_id, data_extra, sz_extra)) continue;
 		if (rec_resp() != Resp_OK) {
-			rec_discard_in_ms(500); continue;
+			rec_discard_in_ms(Timeout_Comm_Max); continue;
 		}
 		return true;
 	}
@@ -216,6 +222,7 @@ void CommLayer::rec_discard_in_ms(uint32_t ms)
 	char ch; steady_clock::time_point t_end = steady_clock::now() + milliseconds(ms);
 	while (steady_clock::now() < t_end)
 		serial.ReadChar(&ch, 1);
+	serial.FlushReceiver();
 }
 
 static bool array_equal(char* target, const char* source, uint32_t sz);

@@ -46,6 +46,7 @@ struct Locale
 			event_buffer_full,
 	        
 	        name_bat_voltage,
+	        name_dac_voltage,
 	        name_bat_current,
 	        
 	        title_main_window,
@@ -61,13 +62,17 @@ struct Locale
 			message_input_v_bat,
 			message_report_vrefint,
 			
+			title_dialog_config,
+			title_dialog_dac_scan,
+	        caption_button_ok,
+	        caption_button_cancel,
+			caption_button_dac_scan,
+	        caption_button_close,
 			message_invalid_input,
 			
 	        title_dialog_open_file,
 	        title_dialog_save_file,
 	        name_file_filter_csv,
-	        caption_button_ok,
-	        caption_button_cancel,
 	        message_failed_to_save_file;
 	
 	const ustring str_empty = "", str_hyphen = " - ";

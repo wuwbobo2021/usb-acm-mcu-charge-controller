@@ -51,7 +51,10 @@ inline DataCallbackPtr MemberFuncDataCallbackPtr(T* pobj)
 const unsigned int Oversampling_Radius = 8,
                    Data_Amount_Per_Av_First = 128,
                    Data_Amount_Per_Av_Second = ADC_Bulk_Data_Amount / Data_Amount_Per_Av_First,
-                   Interval_Read_VRefInt = 60 * 1000;
+                   Interval_Read_VRefInt = 60 * 1000, //sec
+                   
+                   Timeout_Comm_Max = 400, //ms
+                   Timeout_Data_Max = 1000;
 
 class CommLayer
 {
@@ -60,8 +63,8 @@ class CommLayer
 	
 	Cmd_ADC_Config adc_conf; float bulk_interval_ms;
 	
-	float vrefint = ADC_VRefInt;
-	float vdda = 3.3; //measured at this layer
+	volatile float vrefint = ADC_VRefInt;
+	volatile float vdda = 3.3; //measured at this layer
 	steady_clock::time_point t_read_ad_vrefint;
 	
 	thread* thread_comm = NULL; thread* thread_proc = NULL;
@@ -69,20 +72,20 @@ class CommLayer
 	volatile bool flag_dac_output = false;
 	float vdac = 0.0; volatile uint16_t dac_new_val;
 	
-	char adc_raw_data[ADC_Bulk_Size]; bool flag_data_ready = false;
+	char adc_raw_data[ADC_Bulk_Size]; volatile bool flag_data_ready = false;
 	uint16_t adc1_raw_data[ADC_Buffer_Data_Amount], adc2_raw_data[ADC_Buffer_Data_Amount];
 	float adc1_values[Data_Amount_Per_Av_Second], adc2_values[Data_Amount_Per_Av_Second];
 	float adc1_value, adc2_value; unsigned int cnt_zero = 0;
     
 	DataCallbackPtr callback_ptr;
-
+	
 	volatile bool flag_shake = false, flag_shake_success = false;
 	volatile bool flag_close = false;
 	
 	bool send_cmd_rec_resp(char cmd_id, const char* data_extra = NULL, uint32_t sz_extra = 0);
 	bool send_cmd(char cmd_id, const char* data_extra = NULL, uint32_t sz_extra = 0);
-	int rec_resp(char* data_extra = NULL, uint32_t sz_extra = 0, uint32_t timeout_ms = 500);
-	bool rec_until(const char* exp_data, uint32_t sz_data, uint32_t timeout_ms = 500);
+	int rec_resp(char* data_extra = NULL, uint32_t sz_extra = 0, uint32_t timeout_ms = Timeout_Comm_Max);
+	bool rec_until(const char* exp_data, uint32_t sz_data, uint32_t timeout_ms = Timeout_Comm_Max);
 	void rec_discard_in_ms(uint32_t ms);
 	
 	bool rec_data(uint32_t timeout_ms);
@@ -96,6 +99,8 @@ class CommLayer
 	void process_loop();
 	
 public:
+	volatile bool opt_measure_vdda = true;
+	
 	CommLayer();
 	~CommLayer();
 	

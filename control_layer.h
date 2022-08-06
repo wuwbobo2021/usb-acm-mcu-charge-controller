@@ -22,6 +22,7 @@ enum ChargeControlState
 	Device_Disconnected = 0,
 	Battery_Disconnected,
 	Battery_Connected,
+	DAC_Scanning,
 	Battery_Charging_CC, //const current stage
 	Battery_Charging_CV, //const voltage stage
 	Charge_Completed,
@@ -35,6 +36,7 @@ enum ChargeControlEvent
 	Event_Battery_Connect,
 	Event_Battery_Disconnect,
 	Event_New_Data,
+	Event_Scan_Complete,
 	Event_Charge_Complete,
 	Event_Charge_Brake
 };
@@ -52,7 +54,30 @@ struct ChargeControlConfig
 	      v_bat_detect_th = 0.4,		// threshold for battery detection (V)
 	      v_dac_adj_step = 0.001,		// minimum increment/decrement of DAC output voltage (V)
 	      v_bat_dec_th = 0.002;			// threshold for detecting voltage decline (V), for Ni-MH batteries
+	
+	bool operator==(const ChargeControlConfig& conf);
+	bool operator!=(const ChargeControlConfig& conf);
 };
+
+inline bool ChargeControlConfig::operator==(const ChargeControlConfig& conf)
+{
+	return    v_refint == conf.v_refint
+	       && v_ext_power == conf.v_ext_power
+	       && div_prop == conf.div_prop
+	       && r_samp == conf.r_samp
+	       && r_extra == conf.r_extra
+	       && i_max == conf.i_max
+	       && p_mos_max == conf.p_mos_max
+	       
+	       && v_bat_detect_th == conf.v_bat_detect_th
+	       && v_dac_adj_step == conf.v_dac_adj_step
+	       && v_bat_dec_th == conf.v_bat_dec_th;
+}
+
+inline bool ChargeControlConfig::operator!=(const ChargeControlConfig& conf)
+{
+	return ! (*this == conf);
+}
 
 struct ChargeParameters
 {
@@ -150,9 +175,13 @@ class ChargeControlLayer
 	CommLayer comm; DataCallbackPtr data_callback_ptr;
 	thread* thread_control = NULL; EventCallbackPtr event_callback_ptr;
 	
-	volatile bool flag_new_data = false, flag_start = false, flag_stop = false, flag_close = false;
+	volatile bool flag_new_data = false; //set by data callback
+	volatile bool flag_dac_scan = false, flag_stop_dac_scan = false;
+	volatile bool flag_start = false, flag_stop = false, flag_close = false;
 	steady_clock::time_point t_shake, t_shake_suc; unsigned int cnt_shake_failed = 0;
-	unsigned int cnt_v_dec = 0, cnt_v_max_detect = 0;
+	volatile unsigned int cnt_v_max_detect = 0;
+	unsigned int cnt_v_dec = 0; float i_dec_start = 0;
+	unsigned int cnt_i_min = 0;
 	
 	void control_loop();
 	
@@ -167,22 +196,21 @@ class ChargeControlLayer
 	void data_callback(float udiv, float usamp);
 	
 public:
-	
 	ChargeControlLayer();
 	~ChargeControlLayer();
 	
+	float data_interval() const;
 	ChargeControlConfig hard_config() const;
 	ChargeParameters charge_param() const;
 	ChargeStatus control_status() const;
-
-	float data_interval() const;
-	const float* battery_current_ptr() const;
-	const float* battery_voltage_ptr() const;
+	const ChargeStatus* control_status_ptr() const;
 	
 	bool set_hard_config(ChargeControlConfig new_conf);
 	bool set_charge_param(ChargeParameters new_param);
 	void set_event_callback_ptr(EventCallbackPtr ptr);
 	void calibrate(float v_bat_actual);
+	bool dac_scan();
+	void stop_dac_scan();
 	bool start_charging();
 	void stop_charging();
 };
@@ -207,14 +235,9 @@ inline float ChargeControlLayer::data_interval() const
 	return comm.data_interval();
 }
 
-inline const float* ChargeControlLayer::battery_current_ptr() const
+inline const ChargeStatus* ChargeControlLayer::control_status_ptr() const
 {
-	return & status.bat_current;
-}
-
-inline const float* ChargeControlLayer::battery_voltage_ptr() const
-{
-	return & status.bat_voltage;
+	return &status;
 }
 
 inline void ChargeControlLayer::set_event_callback_ptr(EventCallbackPtr ptr)
