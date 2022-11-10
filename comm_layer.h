@@ -8,12 +8,14 @@
 #include <thread>
 
 #include "serialib/serialib.h"
-#include "usb_adc_dac.h"
+#include "simple-cairo-plot/circularbuffer.h"
+#include "comm_protocol.h"
 
 using namespace std;
 using namespace std::chrono;
+using SimpleCairoPlot::CircularBuffer;
 
-typedef void (*DataCallbackAddr)(void*, float, float);
+using DataCallbackAddr = void (*)(void*, float, float);
 
 class DataCallbackPtr
 {
@@ -48,59 +50,9 @@ inline DataCallbackPtr MemberFuncDataCallbackPtr(T* pobj)
 	return DataCallbackPtr(static_cast<void*>(pobj), &MemberFuncDataCallback<T, F>);
 }
 
-const unsigned int Oversampling_Radius = 8,
-                   Data_Amount_Per_Av_First = 128,
-                   Data_Amount_Per_Av_Second = ADC_Bulk_Data_Amount / Data_Amount_Per_Av_First,
-                   Interval_Read_VRefInt = 60 * 1000, //sec
-                   
-                   Timeout_Comm_Max = 400, //ms
-                   Timeout_Data_Max = 1000;
-
 class CommLayer
 {
-	Serialib::Serial serial;
-	volatile bool flag_connected = false;
-	
-	Cmd_ADC_Config adc_conf; float bulk_interval_ms;
-	
-	volatile float vrefint = ADC_VRefInt;
-	volatile float vdda = 3.3; //measured at this layer
-	steady_clock::time_point t_read_ad_vrefint;
-	
-	thread* thread_comm = NULL; thread* thread_proc = NULL;
-	
-	volatile bool flag_dac_output = false;
-	float vdac = 0.0; volatile uint16_t dac_new_val;
-	
-	char adc_raw_data[ADC_Bulk_Size]; volatile bool flag_data_ready = false;
-	uint16_t adc1_raw_data[ADC_Buffer_Data_Amount], adc2_raw_data[ADC_Buffer_Data_Amount];
-	float adc1_values[Data_Amount_Per_Av_Second], adc2_values[Data_Amount_Per_Av_Second];
-	float adc1_value, adc2_value; unsigned int cnt_zero = 0;
-    
-	DataCallbackPtr callback_ptr;
-	
-	volatile bool flag_shake = false, flag_shake_success = false;
-	volatile bool flag_close = false;
-	
-	bool send_cmd_rec_resp(char cmd_id, const char* data_extra = NULL, uint32_t sz_extra = 0);
-	bool send_cmd(char cmd_id, const char* data_extra = NULL, uint32_t sz_extra = 0);
-	int rec_resp(char* data_extra = NULL, uint32_t sz_extra = 0, uint32_t timeout_ms = Timeout_Comm_Max);
-	bool rec_until(const char* exp_data, uint32_t sz_data, uint32_t timeout_ms = Timeout_Comm_Max);
-	void rec_discard_in_ms(uint32_t ms);
-	
-	bool rec_data(uint32_t timeout_ms);
-    void process_data();
-    
-	bool read_ad_vrefint(bool recover = false);
-	float get_voltage(float val);
-	uint16_t from_voltage(float val);
-	
-	void comm_loop();
-	void process_loop();
-	
 public:
-	volatile bool opt_measure_vdda = true;
-	
 	CommLayer();
 	~CommLayer();
 	
@@ -114,20 +66,63 @@ public:
 	bool shake();
 	bool set_voltage_vrefint(float new_vrefint);
 	float vrefint_calibrate(float v_adc1_actual); //returns new estimation of VRefInt
-	void dac_output(float val);
+	bool dac_output(float val);
+
+private:
+	enum {
+		Raw_Data_Interval = 100,
+		Data_Amount_Per_Av_First = 128,
+		Oversampling_Radius = 8,
+	};
+	
+	Serialib::Serial serial;
+	volatile bool flag_connected = false;
+	
+	Resp_Check hard_param;
+	Cmd_ADC_Start adc_conf; float bulk_interval_ms;
+	unsigned int data_amount_per_av_first, data_amount_per_av_second;
+	
+	Cmd_PWM_DAC pwm_dac_conf = {comm_cmd(Cmd_ID_PWM_DAC), 0, 0, 1, 0, true};
+	
+	volatile float vrefint = 0; volatile bool flag_override_vrefint = false;
+	volatile float vdda = 3.3; CircularBuffer buf_vdda; //calculated at this layer
+	
+	thread* thread_comm = NULL;
+	thread* thread_proc = NULL;
+	
+	volatile bool flag_dac_output = false;
+	float vdac = 0.0; volatile uint16_t dac_new_val;
+	
+	volatile bool flag_data_ready = false;
+	volatile uint16_t ad_refint; uint8_t* adc_raw_data = NULL;
+	
+	uint16_t* adc1_raw_data; uint16_t* adc2_raw_data;
+	float* adc1_values; float* adc2_values;
+	float adc1_value, adc2_value; unsigned int cnt_zero = 0;
+    
+	DataCallbackPtr callback_ptr;
+	
+	volatile bool flag_shake = false, flag_shake_success = false;
+	volatile bool flag_close = false;
+	
+	bool adc_config();
+	
+	void comm_loop();
+	void process_loop();
+	
+	inline bool apply_cmd(uint8_t cmd_id, CommResp* rec_data = NULL);
+	bool apply_cmd(const CommCmd& cmd, CommResp* rec_data = NULL);
+	
+	bool rec_data(uint32_t timeout_ms);
+	bool rec_until(const uint8_t* exp_data, uint32_t sz_data,
+	               uint32_t timeout_ms = Timeout_Comm_Max);
+	void rec_discard_in_ms(uint32_t ms);
+	
+	void process_data();
+	
+	float get_voltage(float val);
+	uint16_t from_voltage(float val);
 };
-
-inline CommLayer::CommLayer()
-{
-	adc_conf.Use_VRefInt_For_ADC2 = false;
-	adc_conf.ADC_SampleTime = ADC_SampleTime_601Cycles5;
-	bulk_interval_ms = ADC_Buffer_Data_Amount * adc_raw_data_interval_ms(adc_conf.ADC_SampleTime);
-}
-
-inline CommLayer::~CommLayer()
-{
-	if (flag_connected) disconnect();
-}
 
 inline bool CommLayer::is_connected() const
 {
@@ -152,18 +147,34 @@ inline float CommLayer::voltage_vrefint() const
 inline bool CommLayer::set_voltage_vrefint(float new_vrefint)
 {
 	if (new_vrefint < 0.1 || new_vrefint > 4.8) return false;
-	vdda *= new_vrefint / vrefint;
+	if (vrefint) vdda *= new_vrefint / vrefint;
 	vrefint = new_vrefint;
+	flag_override_vrefint = true;
 	return true;
 }
 
 inline float CommLayer::vrefint_calibrate(float v_adc1_actual)
 {
-	if (!flag_connected || adc1_value == 0) return vrefint; //invalid operation, return original value of vrefint
+	if (!flag_connected || adc1_value == 0)
+		return vrefint; //invalid operation, return original value of vrefint
 	
 	float d = v_adc1_actual / get_voltage(adc1_value);
-	vdda *= d; vrefint *= d;
+	vrefint *= d; vdda *= d;
+	buf_vdda.clear(true); buf_vdda.push(vdda);
 	return vrefint;
+}
+
+inline CommLayer::~CommLayer()
+{
+	if (flag_connected) disconnect();
+}
+
+// private functions
+
+inline bool CommLayer::apply_cmd(uint8_t cmd_id, CommResp* rec_data)
+{
+	CommCmd cmd = comm_cmd(cmd_id);
+	return apply_cmd(cmd, rec_data);
 }
 
 inline float CommLayer::get_voltage(float val) {

@@ -7,10 +7,20 @@
 #include <chrono>
 #include <iomanip>
 
+#include <glibmm/timer.h>
 #include <glibmm/stringutils.h>
 #include <gtkmm/grid.h>
 #include <gtkmm/separator.h>
-#include <gtkmm/messagedialog.h>
+
+#ifdef DEBUG
+	#include <iostream>
+	#ifdef dbg_print
+		#undef dbg_print
+	#endif
+	#define dbg_print(str) {cout << "( UI ) " << (str) << endl;}
+#else
+	#define dbg_print(str)
+#endif
 
 using namespace SimpleCairoPlot;
 
@@ -32,29 +42,10 @@ void UILayer::init(ChargeControlLayer* ctrl, unsigned int buf_size)
 		throw std::runtime_error("UILayer::init(): invalid parameter.");
 	
 	this->ctrl = ctrl; this->buf_size = buf_size;
-	this->ctrl->set_event_callback_ptr(MemberFuncEventCallbackPtr<UILayer, &UILayer::control_event_callback>(this));
+	this->ctrl->set_event_callback_ptr
+		(MemberFuncEventCallbackPtr<UILayer, &UILayer::control_event_callback>(this));
 	
 	sst.setf(ios::fixed); sst.precision(3);
-}
-
-void UILayer::open()
-{
-	if (this->thread_gtk || this->window) return;
-	this->thread_gtk = new thread(&UILayer::app_run, this);
-	
-	while (! this->window)
-		this_thread::sleep_for(chrono::milliseconds(10));
-	this_thread::sleep_for(chrono::milliseconds(10));
-}
-
-Recorder& UILayer::recorder() const
-{
-	steady_clock::time_point t = steady_clock::now();
-	while (!this->window && ms_since(t) < 5000)
-		std::this_thread::sleep_for(chrono::milliseconds(10));
-	if (! this->window)
-		throw std::runtime_error("UILayer::recorder(): frontend is not opened.");
-	return *this->rec;
 }
 
 void UILayer::run()
@@ -90,15 +81,15 @@ void UILayer::app_run()
 	Glib::RefPtr<Gtk::Application> app = Gtk::Application::create(UILayer::App_Name);
 	this->dispatcher_refresh = new Glib::Dispatcher;
 	this->dispatcher_close = new Glib::Dispatcher;
-	this->create_window(); this->create_file_dialog();
+	this->create_window(); this->create_file_dialog(); this->create_notify_dialog();
 	this->dispatcher_refresh->connect(sigc::mem_fun(*this, &UILayer::refresh_ui));
 	this->dispatcher_close->connect(sigc::mem_fun(*this, &UILayer::close_window));
 	app->run(*this->window);
 	
 	this->window = NULL; //the window is already destructed when the thread exits Application::run()
-	delete this->file_dialog;
+	delete this->file_dialog; delete this->notify_dialog;
 	delete this->dispatcher_refresh; delete this->dispatcher_close;
-} // Unsolved problem on windows platform when running in a new thread: Segmentation fault received here.
+}
 
 void UILayer::create_window()
 {
@@ -117,14 +108,14 @@ void UILayer::create_window()
 	this->rec = Gtk::manage(new Recorder(ptrs, this->buf_size));
 	this->rec->set_interval(Recorder_Interval);
 	this->rec->set_redraw_interval(UI_Refresh_Interval);
-	this->rec->set_index_range((unsigned int)(30 * 60 * 1000.0 / this->ctrl->data_interval()) - 1);
-	this->rec->set_option_auto_extend_index_range(true);
-	this->rec->set_option_axis_x_int_values(true);
-	this->rec->set_y_range_length_min(0, 0.4); this->rec->set_option_auto_set_zero_bottom(0, false); //bat_voltage
-	this->rec->set_y_range_length_min(1, 0.1); //bat_current
+	this->rec->set_axis_x_range((unsigned int)(30 * 60 * 1000.0 / this->ctrl->data_interval()) - 1);
+	this->rec->set_option_auto_extend_range_x(true);
+	this->rec->set_option_fixed_axis_scale(false); this->rec->set_option_axis_x_int_values(true);
+	this->rec->set_axis_y_range_length_min(0, 0.4); this->rec->set_option_auto_set_zero_bottom(0, false); //bat_voltage
+	this->rec->set_axis_y_range_length_min(1, 0.1); //bat_current
 	this->rec->signal_full().connect(sigc::mem_fun(*this, &UILayer::on_buffers_full));
-	this->st_last = this->ctrl->control_status().control_state;
-	if (this->st_last != Device_Disconnected) this->rec->start();
+	if (this->ctrl->control_status().control_state != Device_Disconnected)
+		this->rec->start();
 	
 	// initialize controls in the right panel
 	button_on_off = Gtk::manage(new Gtk::Button(locale_str.caption_button_on));
@@ -143,6 +134,7 @@ void UILayer::create_window()
 	
 	entry_exp_current = Gtk::manage(new Gtk::Entry()); entry_exp_current->set_width_chars(6);
 	entry_exp_voltage = Gtk::manage(new Gtk::Entry()); entry_exp_voltage->set_width_chars(6);
+	entry_exp_voltage_oc = Gtk::manage(new Gtk::Entry()); entry_exp_voltage_oc->set_width_chars(6);
 	entry_exp_charge = Gtk::manage(new Gtk::Entry()); entry_exp_charge->set_width_chars(6);
 	chk_stage_const_v = Gtk::manage(new Gtk::CheckButton(locale_str.name_opt_stage_const_v));
 	entry_min_current = Gtk::manage(new Gtk::Entry()); entry_min_current->set_width_chars(6);
@@ -151,6 +143,7 @@ void UILayer::create_window()
 	
 	Gtk::Label* label_exp_current = Gtk::manage(new Gtk::Label(locale_str.name_exp_current, Gtk::ALIGN_START));
 	Gtk::Label* label_exp_voltage = Gtk::manage(new Gtk::Label(locale_str.name_exp_voltage, Gtk::ALIGN_START));
+	Gtk::Label* label_exp_voltage_oc = Gtk::manage(new Gtk::Label(locale_str.name_exp_voltage_oc, Gtk::ALIGN_START));
 	Gtk::Label* label_exp_charge = Gtk::manage(new Gtk::Label(locale_str.name_exp_charge, Gtk::ALIGN_START));
 	Gtk::Label* label_min_current = Gtk::manage(new Gtk::Label(locale_str.name_min_current, Gtk::ALIGN_START));
 	
@@ -168,12 +161,13 @@ void UILayer::create_window()
 	Gtk::Grid* grid_param = new Gtk::Grid();
 	grid_param->set_halign(Gtk::ALIGN_CENTER);
 	grid_param->set_row_spacing(4); grid_param->set_column_spacing(1);
-	grid_param->attach(*label_exp_current, 0, 0, 1, 1); grid_param->attach(*entry_exp_current, 1, 0, 1, 1);
-	grid_param->attach(*label_exp_voltage, 0, 1, 1, 1); grid_param->attach(*entry_exp_voltage, 1, 1, 1, 1);
-	grid_param->attach(*label_exp_charge,  0, 2, 1, 1); grid_param->attach(*entry_exp_charge,  1, 2, 1, 1);
-	grid_param->attach(*chk_stage_const_v, 0, 3, 2, 1);
-	grid_param->attach(*label_min_current, 0, 4, 1, 1); grid_param->attach(*entry_min_current, 1, 4, 1, 1);
-	grid_param->attach(*button_apply, 0, 5, 2, 1);
+	grid_param->attach(*label_exp_current,    0, 0, 1, 1); grid_param->attach(*entry_exp_current,    1, 0, 1, 1);
+	grid_param->attach(*label_exp_voltage,    0, 1, 1, 1); grid_param->attach(*entry_exp_voltage,    1, 1, 1, 1);
+	grid_param->attach(*label_exp_voltage_oc, 0, 2, 1, 1); grid_param->attach(*entry_exp_voltage_oc, 1, 2, 1, 1);
+	grid_param->attach(*label_exp_charge,     0, 3, 1, 1); grid_param->attach(*entry_exp_charge,     1, 3, 1, 1);
+	grid_param->attach(*chk_stage_const_v,    0, 4, 2, 1);
+	grid_param->attach(*label_min_current,    0, 5, 1, 1); grid_param->attach(*entry_min_current,    1, 5, 1, 1);
+	grid_param->attach(*button_apply,         0, 6, 2, 1);
 	
 	Gtk::Box* box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL)),
 	        * bar = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_VERTICAL));
@@ -195,9 +189,14 @@ void UILayer::create_window()
 	this->window = new Gtk::Window();
 	this->window->set_default_size(900, 700);
 	this->window->add(*box);
-	this->refresh_window_title();
 	this->refresh_ui();
 	this->window->show_all_children();
+}
+
+void UILayer::create_notify_dialog()
+{
+	notify_dialog = new Gtk::MessageDialog(*this->window, "", false, Gtk::MESSAGE_INFO, Gtk::BUTTONS_OK);
+	notify_dialog->signal_response().connect(sigc::mem_fun(*this, &UILayer::on_notify_dialog_response));
 }
 
 void UILayer::create_file_dialog()
@@ -226,14 +225,14 @@ void UILayer::control_event_callback(ChargeControlEvent ev)
 void UILayer::refresh_ui()
 {
 	ChargeControlState st = this->ctrl->control_status().control_state;
+	ChargeControlEvent ev = this->last_event;
 	
 	if (this->flag_event) {
 		this->flag_event = false;
-		if (this->last_event == Event_New_Data) {
+		if (ev == Event_New_Data) {
 			if (ms_since(t_status_refresh) < UI_Refresh_Interval) return;
 		} else {
-			this->flag_show_event = true;
-			switch (this->last_event) {
+			switch (ev) {
 				case Event_Device_Connect: case Event_Battery_Connect:
 					if (!this->rec->is_recording() && st != Battery_Disconnected) this->rec->start();
 					break;
@@ -244,42 +243,48 @@ void UILayer::refresh_ui()
 				
 				default: break;
 			}
+			this->flag_event_notify = true;
+			notify_dialog->set_message(locale_str.control_event_to_str(ev) + '.');
+			notify_dialog->show();
 		}
 	}
-		
+	
 	switch (st) {
 		case Device_Disconnected: case Battery_Disconnected:
 			if (this->rec->is_recording()) this->rec->stop();
-			this->button_on_off->set_label(locale_str.caption_button_on);
-			this->button_on_off->set_sensitive(false);
-			this->button_calibrate->set_sensitive(st == Battery_Disconnected);
-			this->button_open->set_sensitive(true); this->button_save->set_sensitive(true);
+			button_on_off->set_label(locale_str.caption_button_on);
+			button_on_off->set_sensitive(false);
+			button_calibrate->set_sensitive(st == Battery_Disconnected);
+			button_open->set_sensitive(true); button_save->set_sensitive(true);
 			break;
 		
 		case Battery_Connected: case Charge_Completed: case Charge_Stopped:
 			if (! this->rec->is_recording()) this->rec->start();
-			this->button_on_off->set_label(locale_str.caption_button_on);
-			this->button_on_off->set_sensitive(true);
-			this->button_calibrate->set_sensitive(true);
-			this->button_open->set_sensitive(false); this->button_save->set_sensitive(true);
+			button_on_off->set_label(locale_str.caption_button_on);
+			button_on_off->set_sensitive(true);
+			button_calibrate->set_sensitive(true);
+			button_open->set_sensitive(false); button_save->set_sensitive(true);
 			break;
 		
 		case Battery_Charging_CC: case Battery_Charging_CV:
 			if (! this->rec->is_recording()) this->rec->start();
-			this->button_on_off->set_label(locale_str.caption_button_off);
-			this->button_calibrate->set_sensitive(true);
-			this->button_open->set_sensitive(false); this->button_save->set_sensitive(false);
+			button_on_off->set_label(locale_str.caption_button_off);
+			button_calibrate->set_sensitive(true);
+			button_open->set_sensitive(false); button_save->set_sensitive(false);
 			this->window->set_title(locale_str.window_title(st));
 			break;
 		
 		default: break;
 	}
 	
-	refresh_window_title();
+	if (flag_event_notify)
+		Gdk::Display::get_default()->beep();
 	
 	ustring str_st;
 	locale_str.get_control_status_str(ctrl->control_status(), str_st);
 	label_status->set_label(str_st);
+	
+	this->window->set_title(locale_str.window_title(st));
 	
 	t_status_refresh = steady_clock::now();
 }
@@ -289,27 +294,32 @@ void UILayer::on_buffers_full()
 	this->window->set_title(locale_str.window_title(locale_str.event_buffer_full));
 }
 
+void UILayer::on_notify_dialog_response(int response_id)
+{
+	flag_event_notify = false;
+	notify_dialog->hide(); //notify_dialog->close();
+}
+
 void UILayer::on_button_on_off_clicked()
 {
-	flag_show_event = false;
-	
 	ChargeControlState st = this->ctrl->control_status().control_state;
 	if (st == Device_Disconnected || st == Battery_Disconnected) return;
 	
-	if (st != Battery_Charging_CC && st != Battery_Charging_CV)
+	if (st != Battery_Charging_CC && st != Battery_Charging_CV) {
 		this->ctrl->start_charging();
-	else
+		on_button_apply_clicked();
+	} else
 		this->ctrl->stop_charging();
 }
 
-inline std::string float_to_str(float val, std::stringstream& sst)
+static inline std::string float_to_str(float val, std::stringstream& sst)
 {
 	sst.clear(); sst.str("");
 	sst << val;
 	return sst.str();
 }
 
-inline float str_to_float(const string& str, float val_default, std::stringstream& sst)
+static inline float str_to_float(const string& str, float val_default, std::stringstream& sst)
 {
 	sst.clear(); sst.str(str);
 	float val; sst >> val;
@@ -322,8 +332,6 @@ inline float str_to_float(const string& str, float val_default, std::stringstrea
 
 void UILayer::on_button_calibrate_clicked()
 {
-	flag_show_event = false;
-	
 	float v_bat_actual;
 	if (! user_input_value(locale_str.message_input_v_bat, &v_bat_actual,
 	                       this->ctrl->control_status().bat_voltage)) return;
@@ -340,19 +348,13 @@ void UILayer::on_button_calibrate_clicked()
 
 void UILayer::on_button_open_clicked()
 {
-	flag_show_event = false;
 	open_file(this->rec);
 }
 
 void UILayer::on_button_save_clicked()
 {
-	flag_show_event = false;
-	
 	system_clock::time_point t_file;
-	if (this->ctrl->control_status().t_charge_start == t_file) //t_charge_start is not set
-		t_file = system_clock::now();
-	else
-		t_file = this->ctrl->control_status().t_charge_start;
+	t_file = to_system_clock(this->ctrl->control_status().t_charge_start);
 	
 	const time_t t_c = system_clock::to_time_t(t_file);
 	sst.clear(); sst.str("");
@@ -367,11 +369,10 @@ void UILayer::on_button_save_clicked()
 
 void UILayer::on_button_apply_clicked()
 {
-	flag_show_event = false;
-	
 	ChargeParameters param;
 	param.exp_current = str_to_float(entry_exp_current->get_text(), param.exp_current * 1000.0, sst) / 1000.0;
 	param.exp_voltage = str_to_float(entry_exp_voltage->get_text(), param.exp_voltage, sst);
+	param.exp_voltage_oc = str_to_float(entry_exp_voltage_oc->get_text(), param.exp_voltage_oc, sst);
 	param.exp_charge  = str_to_float(entry_exp_charge->get_text(), param.exp_charge / 3.6, sst) * 3.6;
 	param.opt_stage_const_v = chk_stage_const_v->get_active();
 	param.min_current = str_to_float(entry_min_current->get_text(), param.min_current * 1000.0, sst) / 1000.0;
@@ -382,7 +383,6 @@ void UILayer::on_button_apply_clicked()
 
 void UILayer::on_chk_stage_const_v_toggled()
 {
-	flag_show_event = false;
 	entry_min_current->set_sensitive(chk_stage_const_v->get_active());
 }
 
@@ -391,6 +391,7 @@ void UILayer::show_param_values()
 	ChargeParameters param = this->ctrl->charge_param();
 	sst.precision(3);
 	entry_exp_voltage->set_text(float_to_str(param.exp_voltage, sst));
+	entry_exp_voltage_oc->set_text(float_to_str(param.exp_voltage_oc, sst));
 	sst.precision(0);
 	entry_exp_current->set_text(float_to_str(param.exp_current * 1000.0, sst));
 	entry_exp_charge->set_text(float_to_str(param.exp_charge / 3.6, sst));
@@ -441,8 +442,10 @@ bool UILayer::open_file(Recorder* recorder)
 	
 	this->file_dialog->set_title(locale_str.title_dialog_open_file);
 	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_OPEN);
-	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
-	this->file_dialog->close();
+	
+	Gtk::ResponseType resp = (Gtk::ResponseType)
+		this->file_dialog->run();
+	this->file_dialog->hide(); this->file_dialog->close();
 	if (resp != Gtk::RESPONSE_OK) return false;
 	
 	string path = this->file_dialog->get_file()->get_path();
@@ -462,7 +465,8 @@ bool UILayer::save_as_file(Recorder* recorder, const string& file_name_default, 
 	this->file_dialog->set_action(Gtk::FILE_CHOOSER_ACTION_SAVE);
 	this->file_dialog->set_current_name(file_name_default);
 	
-	Gtk::ResponseType resp = (Gtk::ResponseType) this->file_dialog->run();
+	Gtk::ResponseType resp = (Gtk::ResponseType)
+		this->file_dialog->run();
 	this->file_dialog->hide(); this->file_dialog->close();
 	if (resp != Gtk::RESPONSE_OK) return false;
 	
@@ -486,8 +490,6 @@ bool UILayer::save_as_file(Recorder* recorder, const string& file_name_default, 
 
 void UILayer::on_button_config_clicked()
 {
-	flag_show_event = false;
-	
 	ChargeControlConfig conf = this->ctrl->hard_config();
 	
 	Gtk::Dialog* config_dialog = new Gtk::Dialog(locale_str.title_dialog_config, *this->window, true);
@@ -607,8 +609,8 @@ void UILayer::dac_scan(Gtk::Window& parent_window)
 	
 	Recorder* rec_dac_scan = Gtk::manage(new Recorder(ptrs, DAC_Raw_Value_Max));
 	rec_dac_scan->set_interval(Recorder_Interval);
-	rec_dac_scan->set_index_range(DAC_Raw_Value_Max);
-	rec_dac_scan->set_option_record_until_full(true);
+	rec_dac_scan->set_axis_x_range(DAC_Raw_Value_Max);
+	rec_dac_scan->set_option_stop_on_full(true);
 	
 	const int Response_Open = 112, Response_Save = 113;
 	
@@ -625,7 +627,8 @@ void UILayer::dac_scan(Gtk::Window& parent_window)
 	}
 	
 	while (true) {
-		Gtk::ResponseType resp = (Gtk::ResponseType) dac_scan_dialog->run();
+		Gtk::ResponseType resp = (Gtk::ResponseType)
+			dac_scan_dialog->run();
 		
 		if (rec_dac_scan->is_recording())
 			rec_dac_scan->stop();

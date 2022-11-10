@@ -5,7 +5,7 @@
 #define UI_LAYER_H
 
 #include "control_layer.h"
-#include "locale.h"
+#include "ui_locale.h"
 #include "simple-cairo-plot/recorder.h"
 
 #include <iostream>
@@ -16,12 +16,15 @@
 #include <gtkmm/entry.h>
 #include <gtkmm/label.h>
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/messagedialog.h>
 #include <gtkmm/filechooserdialog.h>
 
 using namespace std;
 
 const unsigned int Recorder_Interval   = 100, //ms
-                   UI_Refresh_Interval = 1000;
+                   UI_Refresh_Interval = 1000,
+                   
+                   Buffer_Size_Default = 12 * 3600 * 1000 / Recorder_Interval;
 
 class UILayer: public sigc::trackable
 {
@@ -29,12 +32,13 @@ class UILayer: public sigc::trackable
 	SimpleCairoPlot::Recorder* rec; unsigned int buf_size;
 	
 	thread* thread_gtk = NULL;
-	Glib::Dispatcher* dispatcher_refresh = NULL; ChargeControlEvent last_event;
+	Glib::Dispatcher* dispatcher_refresh = NULL;
 	Glib::Dispatcher* dispatcher_close = NULL;
 	
 	Locale locale_str; stringstream sst;
 	
 	Gtk::Window* window = NULL;
+	Gtk::MessageDialog* notify_dialog = NULL;
 	Gtk::FileChooserDialog* file_dialog = NULL;
 	
 	Gtk::Button* button_on_off = NULL,
@@ -44,6 +48,7 @@ class UILayer: public sigc::trackable
 	
 	Gtk::Entry* entry_exp_current = NULL,
 	          * entry_exp_voltage = NULL,
+	          * entry_exp_voltage_oc = NULL,
 	          * entry_exp_charge = NULL,
 	          * entry_min_current = NULL;
 	
@@ -51,18 +56,21 @@ class UILayer: public sigc::trackable
 	
 	Gtk::Label* label_status = NULL;
 	
-	bool flag_event = false, flag_show_event = false; ChargeControlState st_last;
+	volatile bool flag_event = false; volatile ChargeControlEvent last_event;
+	volatile bool flag_event_notify = false;
 	steady_clock::time_point t_status_refresh;
 	
 	void create_window();
+	void create_notify_dialog();
 	void create_file_dialog();
 	void app_run();
 	
 	void control_event_callback(ChargeControlEvent ev);
 	void refresh_ui();
-	void refresh_window_title();
 	
 	void on_buffers_full();
+	
+	void on_notify_dialog_response(int response_id);
 	
 	void on_button_on_off_clicked();
 	void on_button_config_clicked();
@@ -84,28 +92,14 @@ class UILayer: public sigc::trackable
 public:
 	const std::string App_Name = "org.usb-vcp-mcu-charge-controller.monitor";
 	
-	UILayer(); void init(ChargeControlLayer* ctrl, unsigned int buf_size = 12 * 3600 * 1000 / Recorder_Interval);
-	UILayer(ChargeControlLayer* ctrl, unsigned int buf_size = 12 * 3600 * 1000 / Recorder_Interval);
+	UILayer(); void init(ChargeControlLayer* ctrl, unsigned int buf_size = Buffer_Size_Default);
+	UILayer(ChargeControlLayer* ctrl, unsigned int buf_size = Buffer_Size_Default);
 	UILayer(const UILayer&) = delete;
 	UILayer& operator=(const UILayer&) = delete;
 	virtual ~UILayer();
 	
-	void open(); //create a new thread to run the frontend
-	SimpleCairoPlot::Recorder& recorder() const; //notice: don't keep the returned reference when you need to close the frontend
 	void run(); //run in current thread or join the existing frontend thread, blocks
 	void close();
 };
-
-inline void UILayer::refresh_window_title()
-{
-	if (flag_show_event) {
-		if (last_event != Event_New_Data)
-			this->window->set_title(locale_str.window_title(last_event));
-	} else {	
-		st_last = this->ctrl->control_status().control_state;
-		this->window->set_title(locale_str.window_title(st_last));
-	}
-		
-}
 
 #endif

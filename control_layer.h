@@ -5,16 +5,26 @@
 #define CONTROL_LAYER_H
 
 #include "comm_layer.h"
-#include <chrono>
+
+#ifdef DEBUG
+	#include <iostream>
+	#ifdef dbg_print
+		#undef dbg_print
+	#endif
+	#define dbg_print(str) {cout << "(Ctrl) " << (str) << endl;}
+#else
+	#define dbg_print(str)
+#endif
 
 using namespace std::chrono;
 
-inline float ms_since(steady_clock::time_point t) {
-	return (steady_clock::now() - t).count() / 1000.0 / 1000.0; //nanoseconds to milliseconds
+inline unsigned long int ms_since(steady_clock::time_point t) {
+	return duration_cast<milliseconds>(steady_clock::now() - t).count();
 }
 
-inline float ms_since(system_clock::time_point t) {
-	return (system_clock::now() - t).count() / 1000.0 / 1000.0;
+// cast from steady_clock::time_point to system_clock::time_point
+inline system_clock::time_point to_system_clock(steady_clock::time_point t) {
+	return system_clock::now() - milliseconds(ms_since(t));
 }
 
 enum ChargeControlState
@@ -43,7 +53,7 @@ enum ChargeControlEvent
 
 struct ChargeControlConfig
 {
-	float v_refint = ADC_VRefInt,       // on-chip stable reference voltage (V), it can be calibrated manually
+	float v_refint = 0,                 // on-chip stable reference voltage (V), it can be calibrated manually
 	      v_ext_power = 5.0,			// charge supply voltage (V), no update schedule in current version
 	      div_prop = 5.6 / (3.0 + 5.6),	// divider_percentage, for ADC input of VSupply - VBattery
 	      r_samp = 0.33,				// value of sampling resistor (ohm)
@@ -83,6 +93,7 @@ struct ChargeParameters
 {
 	float exp_current = 0.15,
 	      exp_voltage = 1.35,
+	      exp_voltage_oc = 1.3,
 		  exp_charge = 5400.0; //unit: C
 	
 	bool  opt_stage_const_v = false;	// enable const voltage stage (for Li-ion batteries)
@@ -94,22 +105,24 @@ struct ChargeStatus
 	ChargeControlState control_state;
 	
 	steady_clock::time_point t_last_update;
-	float dac_voltage;
-	float bat_voltage, bat_current, bat_power, mos_power; //unit: V, A, W
+	volatile float dac_voltage;
+	volatile float bat_voltage, bat_current, bat_voltage_oc; //unit: V, A. open-circuit voltage is calculated by ir.
+	float bat_power, mos_power; //unit: W
 	
 	float bat_voltage_initial, bat_voltage_final;
-	system_clock::time_point t_charge_start, t_charge_stop;
+	steady_clock::time_point t_charge_start, t_charge_stop;
 	
 	float bat_voltage_max; steady_clock::time_point t_bat_voltage_max;
 	float bat_current_max; steady_clock::time_point t_bat_current_max;
 	
-	bool flag_ir_measured = false;
+	bool flag_ir_measured = false; steady_clock::time_point t_ir_measure;
 	float ir = 0; //DC internal resistance estimation (ohm)
 	
 	float bat_charge, bat_energy; //unit: C, J
 	
 	ChargeStatus();
 	void reset();
+	void set_state(ChargeControlState st);
 	operator string() const;
 };
 
@@ -122,16 +135,22 @@ inline ChargeStatus::ChargeStatus()
 
 inline void ChargeStatus::reset()
 {
-	control_state = Device_Disconnected;
+	set_state(Device_Disconnected);
 	dac_voltage = 0;
-	bat_voltage = bat_current = bat_power = mos_power = 0;
+	bat_voltage = bat_current = 0;
+}
+
+inline void ChargeStatus::set_state(ChargeControlState st)
+{
+	control_state = st;
+	bat_voltage_oc = bat_power = mos_power = 0;
 	bat_voltage_initial = bat_voltage_final = 0;
 	bat_voltage_max = 0; bat_current_max = 0;
 	flag_ir_measured = false; ir = 0;
 	bat_charge = bat_energy = 0;
 }
 
-typedef void (*EventCallbackAddr)(void*, ChargeControlEvent);
+using EventCallbackAddr = void (*)(void*, ChargeControlEvent);
 
 class EventCallbackPtr
 {
@@ -176,19 +195,21 @@ class ChargeControlLayer
 	thread* thread_control = NULL; EventCallbackPtr event_callback_ptr;
 	
 	volatile bool flag_new_data = false; //set by data callback
+	volatile bool flag_scrolling_average = false;
 	volatile bool flag_dac_scan = false, flag_stop_dac_scan = false;
 	volatile bool flag_start = false, flag_stop = false, flag_close = false;
 	steady_clock::time_point t_shake, t_shake_suc; unsigned int cnt_shake_failed = 0;
-	volatile unsigned int cnt_v_max_detect = 0;
-	unsigned int cnt_v_dec = 0; float i_dec_start = 0;
-	unsigned int cnt_i_min = 0;
+	CircularBuffer buf_bat_voltage, buf_bat_current;
 	
 	void control_loop();
 	
 	bool check_comm();
 	bool check_shake();
 	bool check_bat_connection();
+	void enable_scrolling_average();
+	void disable_scrolling_average();
 	bool wait_for_new_data();
+	bool dac_output(float val);
 	bool measure_ir();
 	void complete_charging(bool successful = true);
 	void do_stop_charging(bool remeasure_voltage);
@@ -243,6 +264,33 @@ inline const ChargeStatus* ChargeControlLayer::control_status_ptr() const
 inline void ChargeControlLayer::set_event_callback_ptr(EventCallbackPtr ptr)
 {
 	event_callback_ptr = ptr;
+}
+
+// private
+inline void ChargeControlLayer::enable_scrolling_average()
+{
+	if (flag_scrolling_average) return;
+	if (status.bat_current) buf_bat_current.push(status.bat_current);
+	if (status.bat_voltage) buf_bat_voltage.push(status.bat_voltage);
+	flag_scrolling_average = true;
+	dbg_print("enabled scrolling average. current voltage: " + to_string(status.bat_voltage));
+}
+
+inline void ChargeControlLayer::disable_scrolling_average()
+{
+	if (! flag_scrolling_average) return;
+	flag_scrolling_average = false;
+	if (buf_bat_current.count()) status.bat_current = buf_bat_current.last_item();
+	if (buf_bat_voltage.count()) status.bat_voltage = buf_bat_voltage.last_item();
+	buf_bat_current.clear(true); buf_bat_voltage.clear(true);
+	dbg_print("disabled scrolling average. current voltage: " + to_string(status.bat_voltage));
+}
+
+inline bool ChargeControlLayer::dac_output(float val)
+{
+	bool suc = comm.dac_output(val);
+	if (suc) status.dac_voltage = val;
+	return suc;
 }
 
 #endif
