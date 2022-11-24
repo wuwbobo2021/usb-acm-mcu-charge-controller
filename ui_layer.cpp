@@ -12,11 +12,11 @@
 #include <gtkmm/grid.h>
 #include <gtkmm/separator.h>
 
+#ifdef dbg_print
+	#undef dbg_print
+#endif
 #ifdef DEBUG
 	#include <iostream>
-	#ifdef dbg_print
-		#undef dbg_print
-	#endif
 	#define dbg_print(str) {cout << "( UI ) " << (str) << endl;}
 #else
 	#define dbg_print(str)
@@ -136,6 +136,7 @@ void UILayer::create_window()
 	entry_exp_voltage = Gtk::manage(new Gtk::Entry()); entry_exp_voltage->set_width_chars(6);
 	entry_exp_voltage_oc = Gtk::manage(new Gtk::Entry()); entry_exp_voltage_oc->set_width_chars(6);
 	entry_exp_charge = Gtk::manage(new Gtk::Entry()); entry_exp_charge->set_width_chars(6);
+	entry_time_limit = Gtk::manage(new Gtk::Entry()); entry_time_limit->set_width_chars(6);
 	chk_stage_const_v = Gtk::manage(new Gtk::CheckButton(locale_str.name_opt_stage_const_v));
 	entry_min_current = Gtk::manage(new Gtk::Entry()); entry_min_current->set_width_chars(6);
 	chk_stage_const_v->signal_toggled().connect(sigc::mem_fun(*this, &UILayer::on_chk_stage_const_v_toggled));
@@ -145,6 +146,7 @@ void UILayer::create_window()
 	Gtk::Label* label_exp_voltage = Gtk::manage(new Gtk::Label(locale_str.name_exp_voltage, Gtk::ALIGN_START));
 	Gtk::Label* label_exp_voltage_oc = Gtk::manage(new Gtk::Label(locale_str.name_exp_voltage_oc, Gtk::ALIGN_START));
 	Gtk::Label* label_exp_charge = Gtk::manage(new Gtk::Label(locale_str.name_exp_charge, Gtk::ALIGN_START));
+	Gtk::Label* label_time_limit = Gtk::manage(new Gtk::Label(locale_str.name_time_limit, Gtk::ALIGN_START));
 	Gtk::Label* label_min_current = Gtk::manage(new Gtk::Label(locale_str.name_min_current, Gtk::ALIGN_START));
 	
 	label_status = Gtk::manage(new Gtk::Label);
@@ -165,9 +167,10 @@ void UILayer::create_window()
 	grid_param->attach(*label_exp_voltage,    0, 1, 1, 1); grid_param->attach(*entry_exp_voltage,    1, 1, 1, 1);
 	grid_param->attach(*label_exp_voltage_oc, 0, 2, 1, 1); grid_param->attach(*entry_exp_voltage_oc, 1, 2, 1, 1);
 	grid_param->attach(*label_exp_charge,     0, 3, 1, 1); grid_param->attach(*entry_exp_charge,     1, 3, 1, 1);
-	grid_param->attach(*chk_stage_const_v,    0, 4, 2, 1);
-	grid_param->attach(*label_min_current,    0, 5, 1, 1); grid_param->attach(*entry_min_current,    1, 5, 1, 1);
-	grid_param->attach(*button_apply,         0, 6, 2, 1);
+	grid_param->attach(*label_time_limit,     0, 4, 1, 1); grid_param->attach(*entry_time_limit,     1, 4, 1, 1);
+	grid_param->attach(*chk_stage_const_v,    0, 5, 2, 1);
+	grid_param->attach(*label_min_current,    0, 6, 1, 1); grid_param->attach(*entry_min_current,    1, 6, 1, 1);
+	grid_param->attach(*button_apply,         0, 7, 2, 1);
 	
 	Gtk::Box* box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL)),
 	        * bar = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_VERTICAL));
@@ -187,7 +190,7 @@ void UILayer::create_window()
 	
 	// create window
 	this->window = new Gtk::Window();
-	this->window->set_default_size(900, 700);
+	this->window->set_default_size(960, 730);
 	this->window->add(*box);
 	this->refresh_ui();
 	this->window->show_all_children();
@@ -374,6 +377,7 @@ void UILayer::on_button_apply_clicked()
 	param.exp_voltage = str_to_float(entry_exp_voltage->get_text(), param.exp_voltage, sst);
 	param.exp_voltage_oc = str_to_float(entry_exp_voltage_oc->get_text(), param.exp_voltage_oc, sst);
 	param.exp_charge  = str_to_float(entry_exp_charge->get_text(), param.exp_charge / 3.6, sst) * 3.6;
+	param.time_limit_sec = str_to_float(entry_time_limit->get_text(), param.time_limit_sec, sst);
 	param.opt_stage_const_v = chk_stage_const_v->get_active();
 	param.min_current = str_to_float(entry_min_current->get_text(), param.min_current * 1000.0, sst) / 1000.0;
 	this->ctrl->set_charge_param(param);
@@ -395,6 +399,7 @@ void UILayer::show_param_values()
 	sst.precision(0);
 	entry_exp_current->set_text(float_to_str(param.exp_current * 1000.0, sst));
 	entry_exp_charge->set_text(float_to_str(param.exp_charge / 3.6, sst));
+	entry_time_limit->set_text(float_to_str(param.time_limit_sec, sst));
 	chk_stage_const_v->set_active(param.opt_stage_const_v);
 	entry_min_current->set_sensitive(param.opt_stage_const_v);
 	entry_min_current->set_text(float_to_str(param.min_current * 1000.0, sst));

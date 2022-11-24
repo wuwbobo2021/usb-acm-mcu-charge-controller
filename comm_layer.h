@@ -72,7 +72,7 @@ private:
 	enum {
 		Raw_Data_Interval = 100,
 		Data_Amount_Per_Av_First = 128,
-		Oversampling_Radius = 8,
+		Oversampling_Radius = 8
 	};
 	
 	Serialib::Serial serial;

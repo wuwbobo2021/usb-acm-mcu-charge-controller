@@ -25,6 +25,7 @@ struct Locale
 			name_exp_voltage,
 			name_exp_voltage_oc,
 	        name_exp_charge,
+	        name_time_limit,
 	        name_opt_stage_const_v,
 	        name_min_current,
 			
@@ -35,6 +36,15 @@ struct Locale
 	        state_battery_charging_cv,
 	        state_charge_completed,
 	        state_charge_stopped,
+	        
+	        stop_flag_brake,
+	        stop_flag_time_limit,
+	        stop_flag_exp_charge,
+	        stop_flag_exp_voltage_oc,
+	        stop_flag_exp_voltage,
+	        stop_flag_vbat_decline,
+	        stop_flag_min_current,
+	        stop_flag_manual,
 	        
 	        event_device_connnect,
 	        event_device_disconnect,
@@ -89,7 +99,9 @@ struct Locale
 	const ustring& window_title() const;
 	const ustring window_title(ustring str) const;
 	const ustring window_title(ChargeControlState st) const;
+	const ustring  control_state_to_str(ChargeControlState st, ChargeStopFlag fl) const;
 	const ustring& control_state_to_str(ChargeControlState st) const;
+	const ustring& stop_flag_to_str(ChargeStopFlag fl) const;
 	const ustring& control_event_to_str(ChargeControlEvent ev) const;
 };
 
@@ -113,6 +125,14 @@ const inline ustring Locale::window_title(ChargeControlState st) const
 	return window_title(control_state_to_str(st));
 }
 
+inline const ustring Locale::control_state_to_str(ChargeControlState st, ChargeStopFlag fl) const
+{
+	ustring str = control_state_to_str(st);
+	if (st == Charge_Completed || st == Charge_Stopped)
+		str += ": " + stop_flag_to_str(fl);
+	return str;
+}
+
 inline const ustring& Locale::control_state_to_str(ChargeControlState st) const
 {
 	switch (st) {
@@ -123,6 +143,22 @@ inline const ustring& Locale::control_state_to_str(ChargeControlState st) const
 		case Battery_Charging_CV:	return state_battery_charging_cv;
 		case Charge_Completed:		return state_charge_completed;
 		case Charge_Stopped:		return state_charge_stopped;
+		
+		default:					return str_empty;
+	}
+}
+
+inline const ustring& Locale::stop_flag_to_str(ChargeStopFlag fl) const
+{
+	switch (fl) {
+		case StopFlag_Brake:			return stop_flag_brake;
+		case StopFlag_Time_Limit:		return stop_flag_time_limit;
+		case StopFlag_Exp_Charge:		return stop_flag_exp_charge;
+		case StopFlag_Exp_Voltage_OC:	return stop_flag_exp_voltage_oc;
+		case StopFlag_Exp_Voltage:		return stop_flag_exp_voltage;
+		case StopFlag_VBat_Decline:		return stop_flag_vbat_decline;
+		case StopFlag_Min_Current:		return stop_flag_min_current;
+		case StopFlag_Manual:			return stop_flag_manual;
 		
 		default:						return str_empty;
 	}

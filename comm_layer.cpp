@@ -7,12 +7,13 @@
 #include <cmath>
 #include <string>
 
+#ifdef dbg_print
+	#undef dbg_print
+#endif
 #ifdef DEBUG
 	#include <iostream>
 	#include <iomanip>
-	#ifdef dbg_print
-		#undef dbg_print
-	#endif
+
 	#define dbg_print(str) {cout << "(Comm) " << (str) << endl;}
 	
 	static inline void dbg_print_bytes(const string& head, const void* ptr, unsigned int cnt) {
@@ -90,7 +91,7 @@ bool CommLayer::shake()
 	unsigned int cnt_ms = 0;
 	while (flag_shake && cnt_ms < 2*Timeout_Data_Max) {
 		if (!flag_connected || flag_close) return false;
-		this_thread::sleep_for(milliseconds(1)); cnt_ms++;
+		this_thread::sleep_for(milliseconds(30)); cnt_ms++;
 	}
 	
 	return flag_shake_success;
@@ -170,7 +171,7 @@ void CommLayer::comm_loop()
 void CommLayer::process_loop()
 {
 	while (true) {
-		this_thread::sleep_for(milliseconds(1));
+		this_thread::sleep_for(milliseconds(30));
 		
 		if (flag_close || !flag_connected) return;
 		if (! flag_data_ready) continue;
@@ -355,7 +356,6 @@ static float get_stable_average(const uint16_t* raw_data, unsigned int cnt, floa
 	float av1 = (float)sum / cnt_rem;
 	
 	// set the over sampling boundary depending on the reference average calculated above.
-	
 	float av2 = 0;
 	sum = 0; cnt_rem = 0;
 	for (uint16_t i = 0; i < cnt; i++) {

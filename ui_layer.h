@@ -50,7 +50,8 @@ class UILayer: public sigc::trackable
 	          * entry_exp_voltage = NULL,
 	          * entry_exp_voltage_oc = NULL,
 	          * entry_exp_charge = NULL,
-	          * entry_min_current = NULL;
+	          * entry_min_current = NULL,
+			  * entry_time_limit = NULL;
 	
 	Gtk::CheckButton* chk_stage_const_v = NULL;
 	
